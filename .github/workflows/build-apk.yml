@@ -1,7 +1,6 @@
 # 在 GitHub Actions（x86_64 免费 runner）上构建 dsh-go arm64 APK。
-# 关键点：dsh-go 的 APK 需要 runtime/out/<abi>/{assets,jniLibs}（repo 里 .gitignore 掉了，
-# 正常要先跑 runtime/build-runtime.sh）。这里直接复用「官方 APK 里自带的 runtime」，
-# 跳过构建 runtime，只跑 flutter build apk。
+# dsh-go 的 APK 需要 runtime/out/<abi>/{assets,jniLibs}（repo 里 .gitignore 掉了，
+# 正常要先跑 runtime/build-runtime.sh）。这里复用「官方 APK 里自带的 runtime」跳过它。
 name: build-apk
 
 on:
@@ -21,7 +20,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +41,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.3.1"
+
+      # settings.gradle.kts 在配置阶段就会读 local.properties 的 flutter.sdk，必须先建
+      - name: Write local.properties (needed by settings.gradle.kts)
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$SDK" "$FLUTTER_ROOT" > app/android/local.properties
+          cat app/android/local.properties
 
       # app/android/.gitignore 忽略了 gradlew / gradle-wrapper.jar，必须先生成
       - name: Generate Gradle wrapper
@@ -72,19 +78,14 @@ jobs:
           for so in libproot.so libproot-loader.so libtalloc.so libandroid-shmem.so; do
             cp -a "/tmp/official/lib/arm64-v8a/$so" "$OUT/jniLibs/arm64-v8a/$so"
           done
-          echo "--- runtime assets ---"; ls -la "$OUT/assets/runtime" | head
-          echo "--- jniLibs ---"; ls -la "$OUT/jniLibs/arm64-v8a"
+          ls -la "$OUT/assets/runtime" | head
+          ls -la "$OUT/jniLibs/arm64-v8a"
 
       - name: flutter pub get
         working-directory: app
         run: flutter pub get
 
-      - name: local.properties
-        working-directory: app
-        run: printf 'sdk.dir=%s\nflutter.sdk=%s\n' "${ANDROID_SDK_ROOT:-$ANDROID_HOME}" "$FLUTTER_ROOT" > android/local.properties
-
-      # 签名：无 app/android/key.properties 时回落 debug key，只可自测，
-      # 装不到官方签名版上（需卸载/改包名/或在 Secrets 配发布 keystore）。
+      # 签名：无 app/android/key.properties → debug key，只可自测（装不到官方签名版上）。
       - name: Build APK
         run: |
           chmod +x tooling/build-apk.sh

@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * EXPERIMENTAL "real root" launch mode.
@@ -30,13 +31,30 @@ object RootMode {
 
     fun available(): Boolean = suPath() != null
 
+    /**
+     * Ask su to prove it grants root now (`id -u` == 0). On KernelSU/Magisk the first
+     * call shows the grant prompt (user has up to 20s); a denial returns false so the
+     * caller falls back to the normal unprivileged launch instead of failing.
+     */
+    fun granted(): Boolean = try {
+        val su = suPath() ?: return false
+        val p = ProcessBuilder(su, "-c", "id -u").redirectErrorStream(true).start()
+        val ok = try { p.waitFor(20, TimeUnit.SECONDS) } catch (_: InterruptedException) { false }
+        if (!ok) { p.destroyForcibly(); return false }
+        val out = p.inputStream.bufferedReader().use { it.readText() }
+        out.lineSequence().any { it.trim() == "0" }
+    } catch (_: Exception) { false }
+
     fun quote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     /** `KEY=VALUE ... exec argv...` for `su -c`, so su's env reset does not lose ours. */
     fun commandWithEnv(argv: List<String>, env: Map<String, String>): String {
-        val pre = env.entries.joinToString(" ") { (k, v) -> "${quote(k)}=${quote(v)}" }
+        // Keys are identifier-safe; quote only the VALUES. Never quote the name:
+        // sh does not treat a quoted "NAME"=v word as an assignment (it tries to
+        // execute a program named `NAME=v`).
+        val assigns = env.entries.joinToString(" ") { (k, v) -> "$k=${quote(v)}" }
         val cmd = argv.joinToString(" ") { quote(it) }
-        return if (pre.isEmpty()) "exec $cmd" else "$pre exec $cmd"
+        return if (assigns.isEmpty()) "exec $cmd" else "export $assigns; exec $cmd"
     }
 
     private fun readCmdline(pid: Int): String? = try {

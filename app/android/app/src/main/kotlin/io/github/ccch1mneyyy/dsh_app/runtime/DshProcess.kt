@@ -79,7 +79,7 @@ class DshProcess(
      */
     fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
         check(process == null) { "already started" }
-        rootMode = !safe && RootMode.available()
+        rootMode = !safe && RootMode.available() && RootMode.granted()
         var selection = DirectLaunch.select(rootfs, directEngine, safe, directFailed)
         if (rootMode) selection = DirectLaunch.Selection(false, null)
         // Only PRoot's fake hard links stand in Direct's way: tidy them once no runtime process is left.
@@ -113,7 +113,13 @@ class DshProcess(
         val argv = ArrayList<String>()
         val sameBind = DirectLaunch.samePathBind(rootfs)
         val launchArgv = DirectLaunch.prootArguments(rootfs, manifest.launchArgv, direct)
-        val allBinds = binds.filterNot { expand(it) == sameBind }.distinct()
+        // Root mode: expose host /data inside the guest (proot runs as uid 0, so it can
+        // actually read it). Guest dir must exist before proot maps it.
+        val rootBinds = if (rootMode) {
+            File(rootfs, "host-data").mkdirs()
+            listOf("/data:/host-data")
+        } else emptyList()
+        val allBinds = (binds + rootBinds).filterNot { expand(it) == sameBind }.distinct()
         // PRoot's Node resolves through glibc, which fails A with a refused AAAA (#152): add Direct's resolver.
         val effectiveGuestEnv = guestEnv + ("DSH_GO_RUNTIME_ROOT" to rootfs.canonicalPath) +
             listOfNotNull(if (direct) null else "NODE_OPTIONS" to DirectLaunch.prootNodeOptions(guestEnv["NODE_OPTIONS"]))

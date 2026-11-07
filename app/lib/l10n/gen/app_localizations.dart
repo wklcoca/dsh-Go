@@ -18038,6 +18038,16 @@ abstract class L10n {
   /// **'直接启动本机引擎'**
   String get phoneDirectEngine;
 
+  String get phoneRootMode;
+
+  String get phoneRootModeHint;
+
+  String get phoneRootNeedsRoot;
+
+  String get phoneRootStopFirst;
+
+  String get phoneRootChangeFailed;
+
   /// No description provided for @phoneDirectHint.
   ///
   /// In zh, this message translates to:

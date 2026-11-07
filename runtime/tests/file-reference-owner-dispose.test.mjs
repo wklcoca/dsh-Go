@@ -20,7 +20,7 @@ async function fixture(t) {
   t.after(async () => { await ctx.fiber.dispose(); await fs.rm(root, { recursive: true, force: true }); });
   // Fixed projection and unused prompt registration are context boundaries;
   // actual WorkingDirectory, filesystem, registry and file search run below.
-  ctx.provide('sessionProjections', { register() {}, stateOf() { return root; } });
+  ctx.provide('sessionProjections', { async register() { return { stateOf() { return root; } }; } });
   ctx.provide('systemPrompt', { context() {}, getContextOrder() { return 1; } });
   await ctx.plugin(LocalFileSystem, { cwd: root }).await();
   await ctx.plugin(WorkingDirectoryService, { defaultDirectory: root }).await();

@@ -107,9 +107,16 @@ class ArtifactFiles {
     final rendered = await client.renderOfficePdf(sessionId, artifact.path);
     if (rendered.pdf.isEmpty) throw const ArtifactError('unsupported');
     await dir.create(recursive: true);
-    await target.writeAsBytes(rendered.pdf, flush: true);
-    marker.writeAsStringSync(stat.version);
-    return target;
+    final staging = await dir.createTemp('.part-');
+    final part = File('${staging.path}/${_safeName(artifact.name)}.pdf');
+    try {
+      await part.writeAsBytes(rendered.pdf, flush: true);
+      part.renameSync(target.path);
+      marker.writeAsStringSync(stat.version);
+      return target;
+    } finally {
+      await staging.delete(recursive: true);
+    }
   }
 
   /// An Android file holding [artifact]; [onProgress] gets 0–1 (null while
@@ -227,6 +234,8 @@ class ArtifactFiles {
 
 String _safeName(String name) {
   final cleaned = name.replaceAll(RegExp(r'[\x00-\x1f/\\:*?"<>|]'), '_').trim();
+  // Keep downloaded content separate from the cache's version marker.
+  if (cleaned == '.version') return 'file.version';
   return cleaned.isEmpty ? 'file' : cleaned;
 }
 

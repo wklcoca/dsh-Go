@@ -77,14 +77,17 @@ test('known but restricted tools stay absent; reserved and unknown errors keep p
   await assert.rejects(f.run(), /toolOrder lists unregistered tool "order-fixture-a"/);
 });
 
-test('assembly waterfall still controls the final tools', async t => {
+test('assembly waterfall controls text while tool declarations remain provider-owned', async t => {
   const a = 'order-fixture-a', b = 'order-fixture-b';
   const f = await fixture(t, [a, b, REST], [schema(b), schema(a)]);
   f.ctx.on('system-prompt/assemble', async (assembly, context, next) => {
     const value = await next();
-    return { ...value, tools: value.tools.slice(0, 1) };
+    assert.equal(value.tools, undefined);
+    return { ...value, tools: [schema('not-a-provider-tool')], sections: [{ name: 'fixture', text: 'transformed' }] };
   });
-  assert.deepEqual((await f.run()).tools.map(x => x.name), [a]);
+  const result = await f.run();
+  assert.deepEqual(result.tools.map(x => x.name), [a, b]);
+  assert.deepEqual(result.sections, [{ name: 'fixture', text: 'transformed' }]);
 });
 
 test('scoped providers append same-name schemas without losing the global contribution', async t => {

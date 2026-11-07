@@ -127,7 +127,7 @@ class DsBotHttpTransport implements DsBotTransport {
             return;
           }
           if (response.statusCode != 200) {
-            await response.drain<void>().catchError((_) {});
+            await response.listen(null).cancel().catchError((_) {});
             throw DshHttpException(response.statusCode, 'HTTP ${response.statusCode} from $feedRoute');
           }
           final parser = SseParser();

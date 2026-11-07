@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 const base = join(resolve(process.env.DSH_PREFIX), 'node_modules/@deepseek-ai');
 const { HttpFetchProvider } = await import(pathToFileURL(join(base, 'dsh-web-fetch-http/lib/index.js')));
 const { WebError } = await import(pathToFileURL(join(base, 'dsh-web/lib/index.js')));
+const { Agent, getGlobalDispatcher, setGlobalDispatcher } = await import(pathToFileURL(join(base, '../undici/index.js')));
 
 async function fixture(t, location, maxRedirects = 3) {
   const paths = [];
@@ -22,7 +23,13 @@ async function fixture(t, location, maxRedirects = 3) {
     res.write('redirect body remains open');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const controller = new AbortController(), closeEntered = Promise.withResolvers();
+  const controller = new AbortController(), cancellation = Promise.withResolvers();
+  const previousDispatcher = getGlobalDispatcher();
+  const dispatcher = new Agent({ connect: { lookup(host, options, callback) {
+    assert.equal(host, 'example.test');
+    callback(null, options.all ? [{ address: '127.0.0.1', family: 4 }] : '127.0.0.1', 4);
+  } } });
+  setGlobalDispatcher(dispatcher);
   let pending;
   t.after(async () => {
     // Rescue the original unread-body path after a red assertion; never await a deadline.
@@ -30,35 +37,35 @@ async function fixture(t, location, maxRedirects = 3) {
     if (pending) await pending;
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
+    setGlobalDispatcher(previousDispatcher);
+    await dispatcher.close();
   });
   const provider = new HttpFetchProvider({
     timeoutMs: 30000, maxRedirects, maxResponseBytes: 1024, maxBodyChars: 1024, userAgent: 'redirect-cleanup-test',
-  }, async () => [{ address: '127.0.0.1', family: 4 }]);
-  // The documented resolver seam directs an otherwise public hostname to this
-  // test server. Request, Response, body cancellation and undici Agent are real.
+  });
+  // rc.1 uses the process dispatcher. Only DNS is directed to the local server;
+  // provider requestOnce, Response streams and body cancellation remain real.
   const requestOnce = provider.requestOnce, responses = [];
   provider.requestOnce = async function (...args) {
-    const request = await requestOnce.apply(this, args);
-    const item = { cancellations: 0, closes: 0 };
+    const response = await requestOnce.apply(this, args);
+    const item = { cancellations: 0 };
     responses.push(item);
-    if (request.response.body) {
-      const cancel = request.response.body.cancel.bind(request.response.body);
-      request.response.body.cancel = (...args) => { item.cancellations++; return cancel(...args); };
+    if (response.body) {
+      const cancel = response.body.cancel.bind(response.body);
+      response.body.cancel = (...args) => { item.cancellations++; cancellation.resolve(); return cancel(...args); };
     }
-    const close = request.close;
-    request.close = () => { item.closes++; closeEntered.resolve(); return close(); };
-    return request;
+    return response;
   };
   const url = `http://example.test:${server.address().port}/redirect`;
   pending = provider.fetch({ url }, controller.signal).then(value => ({ value }), error => ({ error }));
-  return { paths, responses, closeEntered: closeEntered.promise, pending };
+  return { paths, responses, cancellation: cancellation.promise, pending };
 }
 
 for (const location of ['http://[', 'http://example.test:bad-port/']) {
-  test(`malformed Location ${location} cancels its real response before Agent.close`, async t => {
+  test(`malformed Location ${location} cancels its real response before rejecting`, async t => {
     const f = await fixture(t, location);
-    await f.closeEntered;
-    t.diagnostic(`malformed Location: body.cancel=${f.responses[0].cancellations} close=${f.responses[0].closes}`);
+    await f.cancellation;
+    t.diagnostic(`malformed Location: body.cancel=${f.responses[0].cancellations}`);
     assert.equal(f.responses[0].cancellations, 1);
     const { error } = await f.pending;
     assert.ok(error instanceof WebError);
@@ -77,7 +84,6 @@ test('same-origin relative redirect still cancels the old body and reads the fin
   assert.equal(result.value.statusCode, 200);
   assert.deepEqual(f.paths, ['/redirect', '/final']);
   assert.deepEqual(f.responses.map(item => item.cancellations), [1, 0]);
-  assert.deepEqual(f.responses.map(item => item.closes), [1, 1]);
 });
 
 for (const [name, location, cap, code] of [

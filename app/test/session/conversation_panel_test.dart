@@ -3,6 +3,7 @@
 
 import 'package:dsh_app/plugins/native/native_model.dart';
 import 'package:dsh_app/plugins/native/native_state.dart';
+import 'package:dsh_app/state/agents_state.dart';
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/state/quick_panel_state.dart';
 import 'package:dsh_app/ui/chat/chat_header.dart';
@@ -19,6 +20,8 @@ import 'package:dsh_app/ui/shell/drawer/drawer_destination.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -34,7 +37,8 @@ ChatState _chat() => ChatState(
   loading: false,
 );
 
-ChatHarness _harness() => ChatHarness(session: 's1', states: {'s1': _chat()});
+ChatHarness _harness({Map<String, ChatState>? states, List<Override> extra = const []}) =>
+    ChatHarness(session: 's1', states: states ?? {'s1': _chat()}, extra: extra);
 
 void main() {
   setUpAll(() async {
@@ -137,6 +141,31 @@ void main() {
       expect(tester.getRect(key).center.dy, moreOrLessEquals(plus.center.dy, epsilon: 0.5));
       expect(tester.getRect(key).width, lessThan(160), reason: 'as wide as its words, the rest left free');
       expect(tester.getRect(key).top, greaterThan(tester.getRect(find.byType(TextField)).top));
+    });
+
+    testWidgets('the model pill grows with large text instead of spilling', (tester) async {
+      await tester.pumpWidget(
+        testApp(
+          Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(4)),
+              child: Scaffold(
+                body: Center(
+                  child: ComposerModelPill(selection: testCatalog.defaultSelection, onSelected: (_) {}),
+                ),
+              ),
+            ),
+          ),
+          overrides: _harness().overrides,
+        ),
+      );
+      await tester.pump();
+      final pill = tester.getRect(find.byKey(const ValueKey('composer-model')));
+      final words = tester.getRect(find.byType(RichText).last);
+      expect(pill.height, greaterThan(36));
+      expect(pill.height, words.height, reason: 'as tall as its words, whatever room it is given');
+      expect(pill.top, lessThanOrEqualTo(words.top));
+      expect(pill.bottom, greaterThanOrEqualTo(words.bottom));
     });
 
     testWidgets('a wide window keeps its chip', (tester) async {
@@ -261,7 +290,7 @@ void main() {
   });
 
   group('the panel', () {
-    Future<List<DrawerDestination>> panel(WidgetTester tester) async {
+    Future<List<DrawerDestination>> panel(WidgetTester tester, {ChatHarness? harness}) async {
       usePhoneView(tester);
       mockClipboard(tester);
       final opened = <DrawerDestination>[];
@@ -273,7 +302,7 @@ void main() {
               child: ConversationPanel(sessionId: 's1', onOpen: opened.add),
             ),
           ),
-          overrides: _harness().overrides,
+          overrides: (harness ?? _harness()).overrides,
         ),
       );
       await tester.pump();
@@ -285,6 +314,131 @@ void main() {
       expect(find.byType(ConversationOverview), findsOneWidget);
       expect(find.text('修复登录重复提交的问题并补上回归测试'), findsOneWidget);
       expect(find.byKey(const ValueKey('overview-model')), findsOneWidget);
+    });
+
+    testWidgets('before the conversation has loaded, 信息 shows the title the list knows', (tester) async {
+      final harness = _harness(states: {'s1': const ChatState(loading: true)});
+      harness.sessions.listed = [
+        SessionSummary(
+          sessionId: 's1',
+          updatedAt: DateTime(2026, 10, 23),
+          running: false,
+          blank: false,
+          agentAvailable: false,
+          projections: const SessionProjections(1, {'title': '列表里的标题'}),
+        ),
+      ];
+      await panel(tester, harness: harness);
+      await tester.pump();
+      expect(find.text('列表里的标题'), findsOneWidget);
+    });
+
+    for (final (mode, opens) in [(SubagentMode.oneShot, false), (SubagentMode.continuable, true)]) {
+      testWidgets('a ${mode.name} subagent ${opens ? 'can' : 'cannot'} change model from 信息', (tester) async {
+        await panel(
+          tester,
+          harness: _harness(
+            extra: [
+              subagentParentProvider.overrideWith(
+                (ref, id) => SubagentParent(
+                  address: SubagentAddress(parentSessionId: 'p', childSessionId: id, mode: mode),
+                  label: '子代理',
+                  parentTitle: '上级',
+                ),
+              ),
+            ],
+          ),
+        );
+        await tester.tap(find.byKey(const ValueKey('overview-model')), warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(find.text('思考深度'), opens ? findsOneWidget : findsNothing);
+      });
+    }
+
+    for (final (turnsOneShot, picks) in [(false, 1), (true, 0)]) {
+      testWidgets('a model picked after the conversation ${turnsOneShot ? 'turned out' : 'did not turn out'} '
+          'one-shot: $picks set', (tester) async {
+        var mode = SubagentMode.continuable;
+        final harness = _harness(
+          extra: [
+            subagentParentProvider.overrideWith(
+              (ref, id) => SubagentParent(
+                address: SubagentAddress(parentSessionId: 'p', childSessionId: id, mode: mode),
+                label: '子代理',
+                parentTitle: '上级',
+              ),
+            ),
+          ],
+        );
+        await panel(tester, harness: harness);
+        await tester.tap(find.byKey(const ValueKey('overview-model')));
+        await tester.pumpAndSettle();
+        if (turnsOneShot) {
+          mode = SubagentMode.oneShot;
+          ProviderScope.containerOf(tester.element(find.byType(ConversationOverview)))
+              .invalidate(subagentParentProvider);
+          await tester.pump();
+        }
+        await tester.tap(find.text('V41 Flash'));
+        await tester.pumpAndSettle();
+        expect(harness.controllers['s1']!.models, hasLength(picks));
+      });
+    }
+
+    testWidgets('a plugin\'s conversation action is a row on 信息, signed with its name', (tester) async {
+      await panel(
+        tester,
+        harness: _harness(
+          extra: [
+            nativeSessionActionsProvider.overrideWithValue(const [
+              NativeAction(package: 'toolbox', surface: NativeSurface.sessionActions, id: 'mark', label: '标记这段对话'),
+            ]),
+          ],
+        ),
+      );
+      final row = find.byKey(const ValueKey('overview-action|toolbox|mark'));
+      expect(row, findsOneWidget);
+      expect(find.descendant(of: row, matching: find.text('标记这段对话')), findsOneWidget);
+      expect(find.descendant(of: row, matching: find.text('toolbox')), findsOneWidget);
+    });
+
+    testWidgets('a long action label at a large text size stays inside its row', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await panel(
+        tester,
+        harness: _harness(
+          extra: [
+            nativeSessionActionsProvider.overrideWithValue(const [
+              NativeAction(
+                package: 'toolbox',
+                surface: NativeSurface.sessionActions,
+                id: 'mark',
+                label: '一二三四五六七八九十一二',
+              ),
+            ]),
+          ],
+        ),
+      );
+      final row = find.byKey(const ValueKey('overview-action|toolbox|mark'));
+      final name = find.descendant(of: row, matching: find.text('toolbox'));
+      expect(tester.getTopRight(name).dx, lessThanOrEqualTo(tester.getTopRight(row).dx));
+    });
+
+    testWidgets('a panel that asked only for its plugin page stays out of 插件', (tester) async {
+      await panel(
+        tester,
+        harness: _harness(
+          extra: [
+            nativePanelsProvider.overrideWithValue(const [
+              NativePanel(package: 'toolbox', id: 'about', title: '状态', placement: {DshGoPanel.pluginPage}),
+            ]),
+          ],
+        ),
+      );
+      await tester.tap(find.text('插件').first);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pane-find-plugins')), findsOneWidget);
     });
 
     testWidgets('插件 is there with no plugins, and says where they come from', (tester) async {

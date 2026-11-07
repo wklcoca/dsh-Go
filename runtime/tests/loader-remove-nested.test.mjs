@@ -47,7 +47,7 @@ for (const [id, label, fileKey] of [
     const originalOther = await readFile(otherFile, 'utf8');
     assert.equal(f.ctx.loader.remove(id), undefined, 'remove retains its synchronous API');
     await fiber.await();
-    await entry.parent.tree.flushWrite();
+    await entry.parent.tree.flush();
     t.diagnostic(`removed=${id} close-count=${f.state.closed.filter(x => x === label).length} live=${f.state.live.size}`);
     assert.equal(f.state.live.has(label), false);
     assert.deepEqual(f.state.closed, [label]);
@@ -77,7 +77,7 @@ test('root and owning-subtree local IDs retain deletion and missing IDs do not m
   const nested = f.ctx.loader.resolve('include:nested:same');
   nested.parent.tree.remove('same');
   await nested.fiber?.await();
-  await nested.parent.tree.flushWrite();
+  await nested.parent.tree.flush();
   assert.equal(f.state.live.has('nested'), false);
   assert.equal(f.state.live.has('outer'), true);
   const before = await readFile(f.main, 'utf8');
@@ -96,7 +96,7 @@ test('a nested create return value round-trips through root resolve and remove',
   assert.equal(f.state.live.has('created'), true);
   f.ctx.loader.remove(id);
   await fiber.await();
-  await tree.flushWrite();
+  await tree.flush();
   assert.equal(f.state.live.has('created'), false);
   assert.throws(() => f.ctx.loader.resolve(id), /cannot resolve entry/);
   assert.throws(() => f.ctx.loader.remove(id), /cannot resolve entry/);

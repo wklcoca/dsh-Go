@@ -2,6 +2,76 @@
 
 每个版本先中文、后英文。发版时把对应版本的正文（不含版本标题）作为 Release 正文，见 `docs/release.md`。
 
+## 1.0.12 · 2026-11-07
+
+### 中文
+
+- **更新前请注意：这一版的运行时有更新，所以还是下整包。** 内置引擎仍是 DSH 0.2.2-rc.1，变的是我们给它打的补丁。升级后 Linux 环境里只保留 `/root`，用 `apt` 装的软件和放在 `/usr/local`、`/opt` 等目录的文件需要重新装。对话和设置不受影响。
+- **这一版没有在真机上验证过。** 目前在 x86_64 模拟器上用测试模型走过从 1.0.11 升级：运行时完成替换，对话和定时任务都在，`/root` 保留、`/usr/local` 清掉，升级后发消息正常。伙伴小屋只经过自动测试，没在模拟器上打开过。 遇到问题请开 issue 反馈。
+- 伙伴小屋（新）：从「切换主机」面板进入的 Live2D 伙伴页面，可以摸摸她、和她聊天。轻量模式由手机直接调模型，不用启动引擎；完整模式在当前主机上开一个普通会话，能用主机的工具，审批照常。她会记得你写下的事；可以用手机自带的朗读或你自己配置的语音服务说话，也能用你自己的录音克隆音色，录音只发给你选的那个服务。Live2D 运行库和角色模型不随 App 提供，需要自己导入素材包。
+- 悬浮宠物：长按打开半轮盘，新增「截图」，截下当前屏幕带进新对话的草稿，不会自动发送。需要 Android 11 及以上。
+- 图片：点图片全屏查看，双指缩放、双击放大；同一组图片可以左右滑动切换。
+- 英文界面：审批理由、插件市场分类和插件详情不再显示中文；英文的思考内容不再出现多余的翻译按钮。
+- 对话：同一轮里的多段正式回答都会保留，不再被误折叠；上下文用量的估算说明更清楚。
+- 远程：没选工作区时，新对话落到最近用过的工作区，新对话页会显示它；主机上一个工作区都没有时会写明「主机默认目录」。新增 `设置 › 远程主机 › 精简历史`，支持的 DSH Remote 主机可以只传历史工具输出的摘要。SSH 认证途中断线会继续重连，不再当成密钥错误，启动失败时显示详情。连接详情里能看到实际走的路径和 IPv4 / IPv6。
+- 引擎：一个被改名或损坏的会话目录不再让整个引擎起不来，其余对话照常显示；安全模式在数据坏掉时用独立的数据目录启动，原来的对话保持原样。用 OpenAI 兼容协议接 Gemini 不再被 400 拒绝。插件安装、更新和热更新时的并发问题已修复；大量文本截断不再切坏字符，编辑文件时保留原来的 BOM 和行尾。
+- 手机操控：OPPO、realme 等机型上确认卡的按钮点不动、只能等倒计时结束的问题已修复（#608、#632）。确认卡不再按触摸事件的字段猜是不是真手指，改成只拒绝 App 自己发出的点击，助手仍然不能替你点「允许」。这一项没在这些机型的真机上验证过。另外，无障碍服务被系统打断时不再直接停止本次操作；后台屏刚打开时的黑帧不再被报成安全窗口；无障碍授权自动恢复失败时会说明原因；通知上的两个停止按钮改叫「停止手机操控」和「停止引擎」。
+- 设置：重置运行环境的确认框写明，`/root` 里没保留的内容（包括工作区文件、`AGENTS.md` 和插件自己存的数据）也会一起删除。
+- 网页版：原版布局下侧栏按钮不再被 App 的浮钮挡住；顶栏按钮不再独占一排。
+
+### English
+
+- **Before you update: this version changes the runtime, so it's a full download again.** The built-in engine is still DSH 0.2.2-rc.1; what changed are the patches we apply to it. Only `/root` stays in the Linux environment, so software installed with `apt` and files in `/usr/local`, `/opt` and similar places need installing again. Chats and settings are kept.
+- **This version hasn't been verified on a real phone.** So far it has run on an x86_64 emulator with a test model, updating from 1.0.11: the runtime was replaced, chats and scheduled tasks were kept, `/root` stayed and `/usr/local` was cleared, and messages worked after the update. The companion room has only been through automated tests and wasn't opened on the emulator. If you hit a problem, please open an issue.
+- Companion room (new): a Live2D companion page, opened from the host switcher. You can pat her and talk to her. Light mode calls the model straight from the phone with no engine to start; full mode opens an ordinary conversation on the current host, with its tools and its usual approvals. She remembers what you write down for her, can speak with the phone's own text-to-speech or a speech service you configure, and can clone a voice from your own recording, which is sent only to the service you choose. The Live2D runtime and character models don't ship with the app; you import a pack yourself.
+- Floating pet: a long press opens a half wheel with a new Screenshot item that takes the current screen into a new chat's draft, without sending it. Requires Android 11 or later.
+- Images: tap an image to view it full screen, pinch or double-tap to zoom, and swipe between images of the same group.
+- English interface: approval reasons, plugin market categories and plugin details no longer show Chinese, and English reasoning no longer shows a needless Translate button.
+- Chat: every final answer in a turn is kept instead of being folded away by mistake, and the context usage estimate is explained more clearly.
+- Remote: with no workspace selected, a new chat starts in the workspace you used last and the new chat page shows it; a host with no workspace at all says "Host default folder". New `Settings › Remote host › Compact history` lets supporting DSH Remote hosts send only summaries of past tool output. An SSH connection dropped during authentication keeps reconnecting instead of being reported as a key error, and a failed start shows its details. Connection details show the path actually used and IPv4 or IPv6.
+- Engine: one renamed or damaged session folder no longer stops the whole engine from starting, and the other chats still show; safe mode starts on a separate data folder when the data is damaged, leaving the original chats untouched. Gemini through the OpenAI-compatible protocol is no longer rejected with a 400. Concurrency problems when installing, updating and hot-reloading plugins are fixed; many text truncations no longer cut characters apart, and editing a file keeps its BOM and line endings.
+- Phone control: on OPPO, realme and similar phones the confirmation card's buttons no longer ignore taps until the countdown runs out (#608, #632). The card no longer guesses from touch event fields whether a finger is real; it only refuses taps the app itself sends, so the assistant still can't tap Allow for you. This hasn't been verified on those phones. Also, an accessibility service interrupted by the system no longer stops the current action; the black first frame of a just-opened background screen is no longer reported as a secure window; when restoring accessibility access automatically fails, the reason is shown; the notification's two stop buttons are now "Stop phone control" and "Stop engine".
+- Settings: the reset runtime dialog says that anything in `/root` you don't keep, including workspace files, `AGENTS.md` and data plugins store themselves, is deleted too.
+- Web UI: in the original layout the sidebar button is no longer covered by the app's floating button, and the header buttons no longer take a row of their own.
+
+## 1.0.11 · 2026-11-05
+
+### 中文
+
+- **更新前请注意：这一版换了运行时，内置引擎升到 DSH 0.2.2-rc.1。** 升级后 Linux 环境里只保留 `/root`，用 `apt` 装的软件和放在 `/usr/local`、`/opt` 等目录的文件会被清掉，需要重新装。对话和设置不受影响。也因为换了运行时，这次还是下整包。新引擎写入后，定时任务不保证还能被旧版引擎读回，不建议退回旧版。
+- **这一版的引擎升级还没在真机上验证过。** 目前在 x86_64 模拟器上用测试模型走过从 1.0.10 升级、发消息、定时任务、窄屏网页版和手机工具，没用过真实模型账号。遇到问题请开 issue 反馈。
+- 网页版：手机宽度下改用官方的抽屉和设置页，顶部的菜单按钮打开官方抽屉。平板和横屏沿用原来的布局。
+- 定时任务：**这里改了 1.0.10 的规则。** 官方页面新增的手动新建现在能用：你自己在页面或 App 里新建、修改任务不再二次确认，和官方一致。助手用工具新建、修改任务仍然要单独确认，拒绝或两分钟内没确认都不保存。确认卡防不住能读到凭据文件的程序，不能代替系统隔离。
+- 定时任务：助手现在创建的任务用新的规则格式，列表里显示「自定义」，和官方一致。这类任务在 App 里能改名字和指令，时间不在这里改，请在对话里让助手改。
+- 对话：手机顶栏把位置留给标题，第二行只放状态和工作区；输入框点进去展开成两行，换模型的按钮就在里面。左滑面板在开着对话时显示这段对话的信息和插件。
+- 动效：新增「灵动动效」，有按压回弹、卡片展开成页面，文字匀速吐出并淡入。默认开启，省电模式和系统关闭动画时不生效，可在 `设置 › 性能` 里关掉。
+- 插件：新增五个可放置的位置：`+` 面板的工具、侧栏的操作、回合脚注、插件页面板和弹窗面板。
+- 手机操控：后台截图处理好了带行填充的画面，操作结束后浮层和触摸都会恢复，已结束的调用不再占着队列。
+- 更新：取消下载后不再改写已有分片；响应头或错误内容很慢时不再一直占着连接；升级后的清理不再删掉刚校验好的新安装包。
+- 分享和文件：损坏的分享链接会被拒绝；截断文字时不再切开表情；保存文件时先占住文件名，互不覆盖。
+- 远程：请求超时后不再启动迟到的请求，也不再留下迟到的连接；重连不会取消已经选定的系统听写。
+- 语音：录音读取失败时结束这次录音，不再留下半截文件；迟到的取消回执不再影响新一轮。
+- 引擎：大量后台路径减少了重复计算和内存分配，比如长输出截断、文件搜索和会话列表。
+- 限制：官方远程插件 0.6.2 还不支持新版的修改和立即运行，通过它连 0.2.2 主机时不能修改、删除或立即运行定时任务，可以查看。如果你在配置里完整复制过旧版的预设，新引擎可能启动不了这个预设，做法见 `docs/maintenance/dsh022-saved-preset-migration.md`。
+
+### English
+
+- **Before you update: this version changes the runtime, and the built-in engine is now DSH 0.2.2-rc.1.** Only `/root` stays in the Linux environment. Software installed with `apt` and files in `/usr/local`, `/opt` and similar places are removed and need installing again. Chats and settings aren't affected. Because the runtime changes, this is a full download. Once the new engine has written them, scheduled tasks may not read back on an older engine, so going back isn't recommended.
+- **The engine upgrade hasn't been verified on a real phone yet.** So far it has run on an x86_64 emulator with a test model: updating from 1.0.10, messages, scheduled tasks, the narrow web UI and phone tools. No real model account was used. If you hit a problem, please open an issue.
+- Web UI: at phone width it now uses the official drawer and settings sheet, and the menu button at the top opens the official drawer. Tablets and landscape keep the previous layout.
+- Scheduled tasks: **this changes the rule from 1.0.10.** The official page's new manual create now works: when you create or edit a task yourself on the page or in the app, there's no second confirmation, as upstream has it. When the assistant creates or edits one through its tools, it still needs separate confirmation, and rejecting or not confirming within two minutes saves nothing. The card can't stop a program that can read the credentials file, so it doesn't replace system isolation.
+- Scheduled tasks: tasks the assistant creates now use a new rule format and read "Custom" in the list, as on the official page. You can change their name and instruction in the app. To change the time, ask the assistant in a chat.
+- Chat: the phone header gives its room to the title, with only status and workspace on the second line. The composer opens into two rows when you tap it, with the model button inside. With a chat open, the swipe panel shows that chat's info and plugins.
+- Motion: a new "Fluid motion" setting adds press rebound, cards that expand into pages, and text that streams at an even pace and fades in. It's on by default, has no effect in battery saver or when the system turns animations off, and can be turned off in `Settings › Performance`.
+- Plugins: five more places to put things: tools on the `+` panel, actions in the side panel, turn notes, panels on a plugin's own page, and panels that open as a sheet.
+- Phone control: background screenshots handle frames with row padding, the overlay and touch come back after an action, and finished calls no longer hold up the queue.
+- Updates: cancelling a download no longer rewrites existing chunks, a slow response header or error body no longer holds a connection, and cleanup after an update no longer deletes a freshly verified package.
+- Sharing and files: damaged share links are refused, truncating text no longer cuts an emoji in half, and saving a file claims its name first so saves don't overwrite each other.
+- Remote: a request that timed out no longer starts late or leaves a late connection, and reconnecting no longer cancels a system dictation you already chose.
+- Voice: a failed recording read ends that recording instead of leaving a partial file, and a late cancel no longer affects the next round.
+- Engine: many background paths do less repeated work and allocate less, such as long output truncation, file search and the session list.
+- Limits: the official remote plugin 0.6.2 doesn't support the new edit and run yet, so through it on a 0.2.2 host you can view scheduled tasks but not edit, delete or run them. If you copied a whole old preset into your config, the new engine may fail to start it; see `docs/maintenance/dsh022-saved-preset-migration.md`.
+
 ## 1.0.10 · 2026-11-04
 
 ### 中文

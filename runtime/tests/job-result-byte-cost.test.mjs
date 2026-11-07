@@ -8,9 +8,9 @@ for(const [name,text] of [['ASCII','a'.repeat(131072)],['BMP','中'.repeat(32768
   assert.deepEqual(r.value,[{type:'text',text:text+'\n[status: completed]'}]);t.diagnostic(JSON.stringify({calls:r.calls,bytes:r.bytes}));assert.equal(r.calls,0);assert.equal(r.bytes,0);
  });
 }
-test('settled notice avoids encoding its complete under-budget long label',async t=>{
+test('settled notice preserves rc.1 bounded labels and avoids length-only encoding',async t=>{
  const label='中'.repeat(32768);const f=fixture(api,{label});const r=await encodedDuring(()=>f.notice());
- assert.equal(r.value.message.content[0].text,`background job task-0123456789abcdef (task: ${label}) finished [status: completed]. Read its output with job_output.`);
+ assert.equal(r.value.message.content[0].text,`background job task-0123456789abcdef (task: ${'中'.repeat(119)}…) finished [status: completed]. No new output.`);
  assert.equal(r.value.message.source.form,'notice');assert.equal(r.value.message.source.summary.length,120);assert.equal(r.value.mode,'inject');t.diagnostic(JSON.stringify({calls:r.calls,bytes:r.bytes}));assert.equal(r.calls,0);
 });
 test('undefined budget is encoding-free and lossy channel/spill prose remains complete',async()=>{

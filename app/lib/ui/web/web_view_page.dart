@@ -73,8 +73,11 @@ class WebViewPage extends StatefulWidget {
   /// the way back above its sidebar.
   final bool dshWeb;
 
-  /// With [dshWeb]: adapt the layout. Off leaves DSH Web exactly as shipped
-  /// (its own icon rail opens the sidebar then).
+  /// With [dshWeb]: adapt the layout. Off leaves DSH Web's own layout alone:
+  /// at phone widths its drawer keeps a leading seat in the header row for
+  /// its sidebar opener, and the handle takes the far left of that row while
+  /// the seat moves past it ([WebChrome.seat]); wider windows show the app's
+  /// bar ([WebChrome.bar]).
   final bool phoneLayout;
 
   /// With [dshWeb]: the page to land on after the first load
@@ -108,11 +111,26 @@ class WebViewPage extends StatefulWidget {
 /// screen the app folds it into a drawer instead.
 const dshWebDesktopWidth = 1024.0;
 
+/// Viewport width below which DSH Web's *own* layout (no app CSS) folds the
+/// sidebar into a drawer and keeps a leading seat in its header row for the
+/// host's button (`drawer = viewport < 768` in `dsh-client-ui-layout`; the
+/// seat is `.leadingSeat` at top 11 / left 12, with
+/// `--dsh-frame-leading-clearance` making room for it). The seat holds DSH
+/// Web's own sidebar opener, so the app's back button takes the far left and
+/// the seat moves past it ([WebChrome.seat]).
+const dshWebDrawerWidth = 768.0;
+
 /// How the app's controls sit on the page.
 enum WebChrome {
   /// A row under the status bar: back · title · reload · open (other sites),
-  /// or just back (DSH Web as shipped).
+  /// or just back (DSH Web as shipped, wider than [dshWebDrawerWidth]).
   bar,
+
+  /// DSH Web as shipped, phone widths: its own drawer layout keeps a leading
+  /// seat in the header row for its sidebar opener, the handle takes the far
+  /// left of that row and the seat moves past it — no bar of its own, and the
+  /// page's opener stays where a finger looks for it.
+  seat,
 
   /// Back and menu inside DSH Web's own header row, which makes room for
   /// them; the sidebar is a drawer.
@@ -137,6 +155,37 @@ abstract final class WebChromeMetrics {
   /// [WebChrome.inline]: offset of the buttons below the status bar (DSH
   /// Web's header row is 40px from 10px down).
   static const inlineTop = 10.0;
+
+  /// [WebChrome.seat]: DSH Web's own leading seat in the drawer layout
+  /// (`.leadingSeat`, top 11 / left 12 in `dsh-client-ui-layout`). What sits
+  /// in it is DSH Web's own sidebar opener — a 28px icon button
+  /// (`HeaderLeadingControls` in `dsh-client-ui-sidebar`), which the official
+  /// layout keeps clear of the page's title with
+  /// `--dsh-frame-leading-clearance: 48px` (12 + 28 + 8).
+  static const seatTop = 11.0;
+  static const seatLeft = 12.0;
+
+  /// [WebChrome.seat]: the official opener's button, and the gap between the
+  /// controls in that row (the official clearance, 48, is
+  /// [seatLeft] + [officialButton] + [gap]).
+  static const officialButton = 28.0;
+  static const gap = 8.0;
+
+  /// [WebChrome.seat]: the marker in that row, the page's own size there
+  /// (its sidebar opener and header icons are all 28), so it reads as one of
+  /// them rather than as a bar of its own. Its touch target is its own size,
+  /// exactly as the page's own controls in that row.
+  static const seatButton = 28.0;
+
+  /// [WebChrome.seat]: the official seat moves this far right, past the
+  /// marker — one header row, no bar of its own, and the page's opener stays
+  /// reachable instead of under the marker.
+  static const seatShift = seatButton + gap;
+
+  /// [WebChrome.seat]: where the page's title starts: past the marker, the
+  /// seat (whatever the official UI or a plugin puts in it, at the official
+  /// 28px + 8px rhythm) and the gap after them.
+  static const seatClearance = seatLeft + seatShift + officialButton + gap;
 
   /// [WebChrome.side]: the band above the sidebar and the official icon
   /// rail's width (`computeColumns` collapsedWidth).
@@ -200,8 +249,27 @@ class WebPageInsets {
       return WebPageInsets(chrome: WebChrome.bar, rootTop: fade, layerTop: fade, bottom: bottom, rootBottom: bottom);
     }
     if (!adapt) {
-      // DSH Web as shipped has an opaque header row of its own: it starts
-      // right under the bar, with no feather over it.
+      // DSH Web as shipped. On a phone its own layout turns the sidebar into
+      // a drawer and keeps a leading seat in the header row for the host's
+      // button; the handle takes that seat, so nothing needs a bar. Wider
+      // windows have no seat (an icon rail instead): the bar holds the handle.
+      if (size.width - padding.horizontal < dshWebDrawerWidth) {
+        const b = WebChromeMetrics.seatButton;
+        const top = WebChromeMetrics.seatTop;
+        return WebPageInsets(
+          chrome: WebChrome.seat,
+          rootTop: padding.top,
+          rootBottom: gesture,
+          left: padding.left,
+          right: padding.right,
+          layerTop: padding.top + top + b + 6,
+          bottom: gesture,
+          leadHeight: top + b,
+          keyboard: keyboard,
+        );
+      }
+      // An opaque header row of its own: it starts right under the bar, with
+      // no feather over it.
       return WebPageInsets(
         chrome: WebChrome.bar,
         rootTop: topChrome,
@@ -306,6 +374,7 @@ class WebPageInsets {
   /// Bottom of the app's controls: content below this is fully clear.
   double chromeBottom(EdgeInsets padding) => switch (chrome) {
     WebChrome.bar => padding.top + WebChromeMetrics.barHeight,
+    WebChrome.seat => padding.top + WebChromeMetrics.seatTop + WebChromeMetrics.seatButton,
     WebChrome.inline => padding.top + WebChromeMetrics.inlineTop + WebChromeMetrics.button,
     WebChrome.side => padding.top + band,
   };
@@ -325,8 +394,31 @@ class WebPageInsets {
     final layout = switch (chrome) {
       WebChrome.inline => 'drawer',
       WebChrome.side => 'desktop',
-      WebChrome.bar => '',
+      WebChrome.bar || WebChrome.seat => '',
     };
+    // [WebChrome.seat]: DSH Web's own drawer layout keeps its sidebar opener
+    // in a leading seat at the frame's top left (28 at 12 / 11) and clears
+    // the page's title past it with `--dsh-frame-leading-clearance` (48 =
+    // 12 + 28 + 8). The marker takes the far left (28 at 12, the same size as
+    // the page's own chrome there), so the whole official seat — its opener,
+    // and anything a plugin mounts in it — moves past the marker instead of
+    // under it; both stay in the one row DSH Web lays out. The clearance then
+    // covers marker, gap, official seat and the gap after it. The fullscreen
+    // right panel has no reserve of its own — its tab strip starts at the
+    // panel's left edge — so it starts past them too: one row, no empty band.
+    //
+    // Both seat rules name the drawer frame: that is where the official
+    // layout puts its seat, so a build that lays the seat out differently is
+    // left exactly as it is (the handle then floats over the page, as before)
+    // instead of pulling the seat to a place of the app's choosing.
+    final seat = chrome == WebChrome.seat
+        ? ':root:root [data-slot="root"]>[class*="_frame"][data-sidebar-drawer]'
+              '{--dsh-frame-leading-clearance:${px(WebChromeMetrics.seatClearance)}!important}'
+              ':root:root [data-slot="root"]>[class*="_frame"][data-sidebar-drawer]>[data-shell-leading]'
+              '{left:${px(WebChromeMetrics.seatLeft + WebChromeMetrics.seatShift)}!important}'
+              ':root:root [data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]'
+              '{padding-left:${px(WebChromeMetrics.seatClearance)}!important}'
+        : '';
     final vars = [
       '--dsh-app-inset-top:${px(layerTop)}',
       '--dsh-app-inset-bottom:${px(bottom)}',
@@ -382,6 +474,8 @@ class WebPageInsets {
           "html,body{overflow:hidden!important;overscroll-behavior:none!important}'",
       "    : vars + 'body{padding-top:${px(rootTop)}!important;padding-bottom:${px(rootBottom)}!important;box-sizing:border-box}');",
       "  sheet('dsh-app-keyboard', root ? ${jsonEncode(typing)} : '');",
+      // The seat is the app's own: only with the official layout chosen.
+      "  sheet('dsh-app-seat', root ? ${jsonEncode(seat)} : '');",
       // The WebView no longer shrinks, so nothing scrolls a field the
       // keyboard covers into view: the focused one goes up to its edge.
       '  window.__dshAppKeyboard = ${keyboard.toStringAsFixed(1)};',
@@ -1018,6 +1112,7 @@ class _WebViewPageState extends State<WebViewPage> {
                   ),
                 ),
               switch (insets.chrome) {
+                WebChrome.seat => _seatControls(padding),
                 WebChrome.inline => _inlineControls(padding, hidden: insets.compact),
                 WebChrome.side => _sideControls(padding),
                 WebChrome.bar => _bar(context, padding),
@@ -1028,6 +1123,19 @@ class _WebViewPageState extends State<WebViewPage> {
       ),
     );
   }
+
+  /// DSH Web as shipped at phone widths: its own drawer layout keeps a
+  /// leading seat in the header row, and the marker takes the far left of
+  /// that row at the size of the page's own chrome — one mark of the app, no
+  /// bar of its own. The page's own opener in the seat moves one gap past the
+  /// marker (see the seat CSS in [WebPageInsets.script]), so both stay in the
+  /// row DSH Web lays out.
+  Widget _seatControls(EdgeInsets padding) => Positioned(
+    key: const ValueKey('web-controls-seat'),
+    left: padding.left + WebChromeMetrics.seatLeft,
+    top: padding.top + WebChromeMetrics.seatTop,
+    child: BackdropGroup(child: _leading(WebChromeMetrics.seatButton)),
+  );
 
   /// Adapted DSH Web below [dshWebDesktopWidth]: only the two buttons, left-
   /// aligned and sized, so the rest of the page's header row stays touchable.
@@ -1073,7 +1181,15 @@ class _WebViewPageState extends State<WebViewPage> {
   /// The back button, or what [WebViewPage.leading] seats there instead.
   Widget _leading(double size) =>
       widget.leading?.call(size) ??
-      GlassIconButton(icon: AppIcons.back, tooltip: context.l10n.commonBack, size: size, onPressed: _back);
+      GlassIconButton(
+        icon: AppIcons.back,
+        tooltip: context.l10n.commonBack,
+        // The app's own chrome takes the whole 22; a marker the size of the
+        // page's own controls shrinks the glyph with it.
+        size: size,
+        iconSize: math.min(22, size * 0.6),
+        onPressed: _back,
+      );
 
   Widget _bar(BuildContext context, EdgeInsets padding) {
     final theme = Theme.of(context);

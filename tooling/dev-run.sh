@@ -91,6 +91,13 @@ if ((wifi)); then
   sleep 2
   adb connect "$ip:5555"
   serial="$ip:5555"
+  # adb connect succeeds on an unauthorized phone too, and it can take a moment to settle.
+  for _ in 1 2 3 4 5; do
+    grep -qxF "$serial" <<<"$(devices)" && break
+    sleep 1
+  done
+  grep -qxF "$serial" <<<"$(devices)" ||
+    die "cannot reach $serial over Wi-Fi: check the network and the phone's authorization prompt"
   echo "dev-run: on Wi-Fi as $serial; the cable can go"
 fi
 phone() { adb -s "$serial" "$@"; }
@@ -112,18 +119,28 @@ if ((install)); then
   after=$(installed_since)
   [[ -z $before || $before == "$after" ]] || die "first install time moved ($before -> $after): the app was reinstalled"
 fi
+# Only a debug build has anything to attach to, and restarting another one would be for nothing.
+package=$(phone shell dumpsys package "$PKG" | tr -d '\r')
+grep -Eq 'flags=\[.*DEBUGGABLE' <<<"$package" ||
+  die "the build on the phone isn't a debug build: run without --attach"
+
 # Attach finds the app by the address it logs when it starts, and only hears that once it
 # is listening: the app restarts a moment after attach is up, not before.
 (
   sleep "${DSH_ATTACH_WAIT:-10}"
+  # Too late to call off: a stop with no launch after it would leave the app closed.
+  trap '' TERM
   phone shell am force-stop "$PKG"
   phone shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 ) &
+restart=$!
+# An attach that gave up during the wait leaves the app alone.
+trap 'kill "$restart" 2>/dev/null || true' EXIT
 
 # --- reload
 cd "$APP"
-name=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' pubspec.yaml)
-code=$(phone shell dumpsys package "$PKG" | sed -n 's/^ *versionCode=\([0-9]*\).*/\1/p' | head -n 1)
+name=$(sed -n 's/^ *versionName=\([^[:space:]]*\).*/\1/p' <<<"$package" | head -n 1)
+code=$(sed -n 's/^ *versionCode=\([0-9]*\).*/\1/p' <<<"$package" | head -n 1)
 # The same define the APK was built with, or a reload would change what it reads.
 exec_flutter=(flutter attach -d "$serial" --app-id "$PKG" "--dart-define=DSH_APP_VERSION=$name+$code")
 "${exec_flutter[@]}"

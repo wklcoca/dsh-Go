@@ -6,7 +6,7 @@
  import { existsSync, globSync, readFileSync, realpathSync, statSync } from "node:fs";
  import { mkdir, mkdtemp, open, readFile, rm } from "node:fs/promises";
  import { dirname, isAbsolute, join, resolve } from "node:path";
-@@ -743,6 +744,7 @@
+@@ -843,6 +844,7 @@
  			}, options.idleTimeoutMs);
  		};
  		const collect = async (stream, kind) => {
@@ -14,7 +14,7 @@
  			try {
  				for await (const chunk of stream) {
  					armIdle();
-@@ -751,9 +753,11 @@
+@@ -851,9 +853,11 @@
  						await log.write(bytes);
  					});
  					await writes;

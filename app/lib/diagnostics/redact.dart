@@ -82,7 +82,17 @@ String redactDiagnostics(String text) {
   if (out.length > maxLineLength) {
     out = out
         .split('\n')
-        .map((line) => line.length > maxLineLength ? '${line.substring(0, maxLineLength)}…' : line)
+        .map((line) {
+          if (line.length <= maxLineLength) return line;
+          var end = maxLineLength;
+          final before = line.codeUnitAt(end - 1);
+          final after = line.codeUnitAt(end);
+          // Keep a supplementary character whole at the truncation boundary.
+          if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+            end--;
+          }
+          return '${line.substring(0, end)}…';
+        })
         .join('\n');
   }
   final secrets = findSecrets(out);

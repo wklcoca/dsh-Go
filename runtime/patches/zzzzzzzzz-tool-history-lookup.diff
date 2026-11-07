@@ -1,6 +1,6 @@
 --- a/node_modules/@deepseek-ai/dsh-session/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-session/lib/index.js
-@@ -684,9 +684,26 @@
+@@ -702,9 +702,26 @@
  		} else if (event.type === "developer/message") {
  			const { message, headerSeq } = event.data;
  			const definitions = headerSeq === void 0 ? [] : this.headers.get(headerSeq);

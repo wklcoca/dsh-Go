@@ -4,8 +4,8 @@ import {join,resolve} from 'node:path';
 export async function fixture(prefix,words=8,bytes=96){
  const require=createRequire(join(resolve(prefix),'package.json'));
  const load=name=>import(pathToFileURL(require.resolve('@deepseek-ai/'+name)));
- const [{Context},{SessionStore},{SessionProjectionRegistry},api,{createUserMessage}]=await Promise.all(['cordis','dsh-session','dsh-session-projection','dsh-session-title','dsh-llm'].map(load));
- const ctx=new Context();await ctx.plugin(SessionStore);await ctx.plugin(SessionProjectionRegistry);
+ const [{Context},{SessionStore},{SessionProjectionRegistry},api,{createUserMessage},{AgentRegistry}]=await Promise.all(['cordis','dsh-session','dsh-session-projection','dsh-session-title','dsh-llm','dsh-agent'].map(load));
+ const ctx=new Context();await ctx.plugin(SessionStore);await ctx.plugin(SessionProjectionRegistry);await ctx.plugin(AgentRegistry);
  await ctx.plugin(api.SessionTitleService,{fallbackMaxWords:words,fallbackMaxBytes:bytes,maxTitleBytes:Math.max(bytes,120)});
  let serial=0;
  return {api,async title(text){

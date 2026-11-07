@@ -11,6 +11,7 @@ async function fixture(t) {
   const ctx = new Context();
   t.after(() => ctx.fiber.dispose());
   for (const name of ['dsh-session', 'dsh-session-projection', 'dsh-agent', 'dsh-llm', 'dsh-tools', 'dsh-system-prompt', 'dsh-mcp-resources']) await ctx.plugin((await load(name)).default);
+  await ctx.plugin(await load('dsh-tool-executor-native'));
   await ctx.plugin((await load('dsh-agent-loop')).AgentLoop, { agents: [] });
   const create = async () => (await ctx.agents.create({ sessionId: `mcp-lookup-${++serial}` })).agent;
   const agent = await create();
@@ -27,7 +28,10 @@ async function fixture(t) {
     const registration = owner === ctx ? resourceOwner : createScope(resourceOwner, scopeOf(owner)).ctx;
     return registration.mcpResources.register(server, provider);
   };
-  const run = (server, caller = agent, name = 'list_mcp_resources', extra = {}) => ctx.tools.execute({ callId: `mcp-call-${++serial}`, name, agent: caller, arguments: { server, ...extra }, signal: new AbortController().signal });
+  const run = async (server, caller = agent, name = 'list_mcp_resources', extra = {}) => {
+    const batch = await ctx.tools.execute({ calls: [{ id: `mcp-call-${++serial}`, name, arguments: JSON.stringify({ server, ...extra }) }], agent: caller, signal: new AbortController().signal });
+    return batch.results[0].result;
+  };
   return { ctx, agent, create, providers, seen, register, run };
 }
 async function counted(f, operation) {

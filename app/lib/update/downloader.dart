@@ -142,8 +142,11 @@ class ApkDownloader {
         if (step == _Step.cancelled) return const DownloadCancelled();
         if (step == _Step.storage) return const DownloadFailed(DownloadFailure.storage);
         if (step == _Step.complete) {
+          // The UI can still cancel while the file is closing or being renamed.
+          if (cancel?.isCancelled ?? false) return const DownloadCancelled();
           try {
             await part.rename(target.path);
+            if (cancel?.isCancelled ?? false) return const DownloadCancelled();
             onVerifying?.call();
             if (await hasher(target) == sha256) return DownloadDone(target, url);
             // Corrupt or tampered: start over from the next source.
@@ -232,6 +235,11 @@ class ApkDownloader {
       return _Step.storage;
     }
     if (expectedSize != null && offset == expectedSize && offset > 0) return _Step.complete;
+
+    // A failed cache check or prior source may have left the caller verifying.
+    // Report the actual resume point before waiting for response headers.
+    onProgress?.call(DownloadProgress(received: offset, total: expectedSize, source: url.label));
+    if (cancel?.isCancelled ?? false) return _Step.cancelled;
 
     final UpdateHttpResponse response;
     try {

@@ -606,7 +606,14 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     await downloader.clean(keep: [asset.name, ?patch?.name]);
     if (!owns()) return;
     void onProgress(DownloadProgress p) {
-      if (owns()) state = state.copyWith(received: p.received, total: () => p.total, source: () => p.source);
+      if (owns()) {
+        state = state.copyWith(
+          task: UpdateTaskPhase.downloading,
+          received: p.received,
+          total: () => p.total,
+          source: () => p.source,
+        );
+      }
     }
 
     void onVerifying() {

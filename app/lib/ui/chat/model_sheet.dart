@@ -89,12 +89,13 @@ class ComposerModelPill extends ConsumerWidget {
         highlightShape: BoxShape.rectangle,
         borderRadius: BorderRadius.circular(20),
         child: Container(
-          height: 36,
+          constraints: const BoxConstraints(minHeight: 36),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: ShapeDecoration(color: colors.onSurface.withValues(alpha: 0.06), shape: const StadiumBorder()),
           // As wide as its words: the row's free space stays between it and the keys.
           child: Center(
             widthFactor: 1,
+            heightFactor: 1,
             child: Text(
               effort == null ? name : '$name ${effortLabel(effort)}',
               maxLines: 1,

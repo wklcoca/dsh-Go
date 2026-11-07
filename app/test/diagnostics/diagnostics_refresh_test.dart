@@ -7,6 +7,7 @@ import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
+import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/state/voice_settings.dart';
 import 'package:dsh_client/dsh_client.dart';
@@ -59,6 +60,11 @@ class _Channel extends DiagnosticsChannel {
   Future<List<String>> engineLog({int maxBytes = 512 * 1024}) async => const [];
 }
 
+class _Phone extends PhoneChannel {
+  @override
+  Future<PhoneStatus> status() async => const PhoneStatus.notReady();
+}
+
 class _Voice extends VoiceSettingsController {
   _Voice([this.hold]);
   Completer<VoiceMode>? hold;
@@ -86,6 +92,7 @@ class _Fixture {
         voiceSettingsProvider.overrideWith(() => voice ?? _Voice()),
         runtimeBridgeProvider.overrideWithValue(_Bridge()),
         diagnosticsChannelProvider.overrideWithValue(_Channel()),
+        phoneChannelProvider.overrideWithValue(_Phone()),
         ...extra,
       ],
     );

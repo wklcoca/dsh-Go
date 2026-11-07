@@ -174,8 +174,7 @@ Future<ScheduleTask> requestSchedule(
   }
 }
 
-/// 「立即运行」: sends the task's instruction into its conversation now, as a
-/// message (queued behind a running turn). Not a Host delivery: the run
-/// history doesn't list it.
+/// 「立即运行」: uses the Host target-aware run API on 0.2.2; legacy Hosts
+/// retain the queued conversation prompt behavior.
 Future<void> runScheduleNow(DshClient client, ScheduleTask task, {String? timeZone}) =>
-    client.prompt(task.sessionId, task.prompt, mode: PromptMode.queue, timeZone: timeZone);
+    client.runScheduledTask(task, timeZone: timeZone);

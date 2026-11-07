@@ -104,3 +104,48 @@ test('retry sync failure is propagated before log deletion and a later retry can
   assert.equal(f.storage.dshGoDeletion.pending.has(f.id), false);
   assert.equal(f.storage.dshGoDeletion.deleted(f.id), true);
 });
+
+test('deleted released-v3 history stays fenced after the rc1 storage plugin reopens the same root', async t => {
+  const f = await fixture(t);
+  await f.storage.dshGoDeletion.delete(f.id, hooks());
+  assert.equal(await f.storage.stat(f.id), undefined);
+  await assert.rejects(f.storage.open(f.id, 'write'), { name: 'SessionPersistenceNotFoundError' });
+  await f.ctx.fiber.dispose();
+  const reopened = new Context();
+  t.after(() => reopened.fiber.dispose());
+  await apply(reopened, { root: f.root, compression: 'none', listConcurrency: 1 });
+  assert.equal(reopened.sessionPersistence.dshGoDeletion.deleted(f.id), true);
+  assert.equal(await reopened.sessionPersistence.stat(f.id), undefined);
+  await assert.rejects(reopened.sessionPersistence.open(f.id, 'write'), { name: 'SessionPersistenceNotFoundError' });
+  await assert.rejects(reopened.sessionPersistence.create(Session.create(f.id).header), { name: 'SessionPersistenceNotFoundError' });
+  assert.equal((await readdir(f.directory)).some(name => /^session\.v[34]\.jsonl/.test(name)), false);
+});
+
+test('real schedule v1-to-v2 storage retains deletion blocking for targets and involved Sessions', async t => {
+  const { JsonStorageBackend } = await load('dsh-storage-json');
+  const { DomainFacility } = await load('dsh-storage-domain');
+  const { ScheduleService, scheduleDomain, createAfterScheduleRecord } = await load('dsh-schedule');
+  const root = await mkdtemp(join(tmpdir(), 'dsh-schedule-migration-'));
+  const ctx = new Context();
+  const backend = new JsonStorageBackend(root);
+  ctx.provide('storage', { backend: { get: () => backend } });
+  const facility = new DomainFacility(ctx, { backend: 'json' });
+  t.after(async () => { await facility.closeAll(); await backend.close(); await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); });
+  const record = createAfterScheduleRecord('legacy-task', 'Synthetic old instruction', 86400, Date.now(), 'Legacy');
+  const path = join(root, 'schedule.json');
+  await writeFile(path, JSON.stringify({ unit: { name: 'schedule', version: 1 }, global: null, tables: { tasks: { [record.id]: { sessionId: 'old-target', record, status: 'active' } } } }));
+  const domain = await facility.open(scheduleDomain);
+  const service = Object.create(ScheduleService.prototype);
+  service.getDomain = async () => domain;
+  assert.equal(await service.dshGoCanDelete(), true);
+  assert.equal(await service.dshGoInspectDeletion('old-target'), true);
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).unit.version, 1, 'opening old storage alone does not rewrite it');
+  const task = domain.table('tasks').get(record.id);
+  assert.deepEqual(task.target, { kind: 'session', sessionId: 'old-target' });
+  await domain.table('tasks').put(record.id, { ...task, target: { kind: 'new_once', sessionId: 'reserved-target', create: {} }, involvedSessionIds: ['old-target', 'actor', 'reserved-target'] });
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).unit.version, 2);
+  for (const id of ['old-target', 'actor', 'reserved-target']) assert.equal(await service.dshGoInspectDeletion(id), true, id);
+  assert.equal(await service.dshGoInspectDeletion('unrelated'), false);
+  await domain.table('tasks').delete(record.id);
+  assert.equal(await service.dshGoInspectDeletion('actor'), false);
+});

@@ -10,6 +10,7 @@ const load = name => import(pathToFileURL(join(base, name, 'lib/index.js')));
 const { Context } = await load('cordis');
 const { SystemPrompt } = await load('dsh-system-prompt');
 const { ToolRuntime } = await load('dsh-tools');
+const { ToolExecutionPipeline } = await import(pathToFileURL(join(base, 'dsh-tools/lib/pipeline.js')));
 const { applyGrepTool } = await load('dsh-tool-fs-search');
 const { ItemRetainer, TextRetainer } = await load('dsh-output-retention');
 const { LocalSpillStore } = await load('dsh-spill-local');
@@ -101,17 +102,22 @@ test('actual post-execute spill saves every previewed match while inline stays c
     path: 'all.txt', lineNumber: i + 1, line: '你好🙂tail',
   })));
   const counts = observe(t), before = JSON.stringify(matches);
-  const result = await ctx.tools.postExecute({
-    name: 'grep', callId: 'fixture-call', agent: { session: { header: { id: 'fixture-session' } } },
-  }, { value: { matches }, isError: false });
+  const definition = ctx.tools.get('grep');
+  const pipeline = new ToolExecutionPipeline(ctx, { get: () => ({ ...definition, execute: () => ({ matches }) }) });
+  const prepared = await pipeline.prepare({
+    name: 'grep', arguments: { pattern: 'needle' }, callId: 'fixture-call',
+    signal: new AbortController().signal, agent: { session: { header: { id: 'fixture-session' } } },
+  });
+  assert.equal(prepared.kind, 'dispatch');
+  const result = await pipeline.complete(prepared.exec, await pipeline.dispatch(prepared.exec));
   assert.ok(saved);
   assert.equal(await readFile(saved.locator, 'utf8'),
     `Found 8 matches\n\nall.txt\n${matches.map(m => `Line ${m.lineNumber}: 你好 (line truncated)`).join('\n')}`);
   assert.ok(result.content[0].text.startsWith('Found 2 of 8 matches\n\nall.txt\nLine 1: 你好 (line truncated)\nLine 2: 你好 (line truncated)\n\n('));
   assert.ok(result.content[0].text.includes(saved.locator));
-  assert.equal(result.value.matches, matches);
+  assert.deepEqual(result.value.matches, matches);
   assert.equal(JSON.stringify(matches), before);
   t.diagnostic(JSON.stringify({ spill: counts }));
-  assert.equal(counts.items, 8);
-  assert.equal(counts.previews, 8 + 2);
+  assert.equal(counts.items, 8 * 3);
+  assert.equal(counts.previews, 2 + 2 + 8 + 2);
 });

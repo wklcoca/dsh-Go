@@ -1,16 +1,24 @@
 --- a/node_modules/@deepseek-ai/dsh-session-reference/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-session-reference/lib/index.js
-@@ -184,2 +184,3 @@
--	const size = () => Buffer.byteLength(stringifyTagSafeJson(data()), "utf8");
+@@ -182,7 +182,8 @@
+ 	});
+ 	const fullData = data();
+ 	const size = () => Buffer.byteLength(stringifyTagSafeJson(data()), "utf8");
 -	while (size() > maxBytes) {
-+	const size = () => Buffer.byteLength(stringifyTagSafeJson(data()), "utf8");
 +	let renderedBytes = size();
 +	while (renderedBytes > maxBytes) {
-@@ -193 +194,6 @@
--		droppedOmittedBytes += Buffer.byteLength(removed.originalText, "utf8");
-+		droppedOmittedBytes += Buffer.byteLength(removed.originalText, "utf8");
+ 		const newestIndex = retained.length - 1;
+ 		const dropIndex = retained.findIndex((item, index) => !item.checkpoint && index !== newestIndex);
+ 		if (dropIndex < 0) break;
+@@ -191,6 +192,11 @@
+ 		if (removed === void 0) throw new Error("session-reference retention selected a missing message");
+ 		omittedMessages += 1;
+ 		droppedOmittedBytes += Buffer.byteLength(removed.originalText, "utf8");
 +		// The newest item survives, so each removal also drops one comma.
 +		renderedBytes -= Buffer.byteLength(stringifyTagSafeJson({
 +			role: removed.role,
 +			text: removed.text
 +		}), "utf8") + 1;
+ 	}
+ 	while (size() > maxBytes) {
+ 		let longestIndex = -1;

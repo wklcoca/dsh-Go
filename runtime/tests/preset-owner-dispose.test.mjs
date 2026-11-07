@@ -19,6 +19,7 @@ export function apply(ctx) { ctx.fixtureState.live++; ctx.effect(() => () => { c
 `);
   const entry = (id, name, config) => ({ id, name: pathToFileURL(join(base, name, 'lib/index.js')).href, config });
   await writeFile(main, JSON.stringify([
+    entry('agents', 'dsh-agent', {}),
     entry('projections', 'dsh-session-projection', {}),
     entry('presets', 'dsh-agent-preset-registry', { default: 'fixture' }),
   ]));

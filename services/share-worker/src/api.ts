@@ -103,14 +103,15 @@ export async function upload(request: Request, env: Env): Promise<Response> {
   for (let attempt = 0; attempt < 4; attempt++) {
     const id = newId(ttl);
     const key = tier.prefix + id;
-    // 58 random bits make a clash vanishingly rare; check anyway.
-    if (await env.BUCKET.head(key)) continue;
+    // Check absence atomically with the write, without a separate R2 read.
     const stored = await env.BUCKET.put(key, body, {
+      onlyIf: new Headers({ 'If-None-Match': '*' }),
       httpMetadata: { contentType: 'application/octet-stream' },
       customMetadata: { dt: tokenHash },
     });
+    if (stored === null) continue;
     await quota.commit();
-    const expires = expiresAt(tier, stored?.uploaded ?? new Date());
+    const expires = expiresAt(tier, stored.uploaded);
     return json(201, { id, deleteToken, expiresAt: expires ? expires.toISOString() : null });
   }
   return error(503, 'try_again');

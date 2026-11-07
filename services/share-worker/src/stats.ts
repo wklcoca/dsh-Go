@@ -53,11 +53,20 @@ function hex(bytes: ArrayBuffer, take: number): string {
   return [...new Uint8Array(bytes).slice(0, take)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Keep only one completed string-key import per isolate. Match the secret
+// exactly so rotation cannot reuse the previous key; never retain a Promise.
+let hmacMemo: { secret: string; key: CryptoKey } | null = null;
+
 export async function hmacHex(key: string | CryptoKey, message: string, bytes: number): Promise<string> {
-  const k =
-    typeof key === 'string'
-      ? await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-      : key;
+  let k: CryptoKey;
+  if (typeof key !== 'string') {
+    k = key;
+  } else if (hmacMemo?.secret === key) {
+    k = hmacMemo.key;
+  } else {
+    k = await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    hmacMemo = { secret: key, key: k };
+  }
   return hex(await crypto.subtle.sign('HMAC', k, encoder.encode(message)), bytes);
 }
 
@@ -76,12 +85,14 @@ export class StatsSalt {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(): Promise<Response> {
-    const day = statsDay(this.now());
+    // The saved day and its expiry must agree even when storage I/O crosses midnight.
+    const now = this.now();
+    const day = statsDay(now);
     let stored = await this.state.storage.get<Salt>('salt');
     if (!stored || stored.day !== day) {
       stored = { day, salt: base64url(crypto.getRandomValues(new Uint8Array(32))) };
       await this.state.storage.put('salt', stored);
-      await this.state.storage.setAlarm(nextDayStart(this.now()));
+      await this.state.storage.setAlarm(nextDayStart(now));
     }
     return new Response(JSON.stringify(stored), { headers: { 'Content-Type': 'application/json' } });
   }
@@ -103,6 +114,7 @@ let saltPending: { day: string; result: Promise<CryptoKey | null> } | null = nul
 
 /** For tests. */
 export function resetStatsMemo(): void {
+  hmacMemo = null;
   saltMemo = null;
   saltPending = null;
 }

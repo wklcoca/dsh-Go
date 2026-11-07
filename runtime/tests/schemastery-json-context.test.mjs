@@ -11,7 +11,7 @@ import { withSources } from './plugin-config-source-fixture.mjs';
 
 assert.ok(process.env.DSH_PREFIX, 'DSH_PREFIX must select the fixed package tree');
 const directory = join(resolve(process.env.DSH_PREFIX), 'node_modules/@deepseek-ai/schemastery');
-assert.equal(JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).version, '3.18.5');
+assert.equal(JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).version, '3.19.0');
 const { default: esm } = await import(pathToFileURL(join(directory, 'lib/index.mjs')));
 const cjs = createRequire(import.meta.url)(join(directory, 'lib/index.cjs'));
 const modules = [['ESM', esm], ['CJS', cjs]];

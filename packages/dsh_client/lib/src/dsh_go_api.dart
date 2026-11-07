@@ -62,6 +62,14 @@ abstract final class DshGoSurfaces {
   static const panel = 'panel';
 
   static const v1 = [composerActions, messageActions, composerStrip, panels];
+
+  static const composerTools = 'composer.tools';
+  static const sessionActions = 'session.actions';
+  static const turnNote = 'turn.note';
+
+  /// What an app that draws the newer places says in [DshGoCaps.surfaces]. A bridge moves a panel
+  /// that asked only for [DshGoPanel.pluginPage] somewhere else for an app that doesn't list it.
+  static const all = [...v1, composerTools, sessionActions, turnNote, DshGoPanel.pluginPage];
 }
 
 // -----------------------------------------------------------------------------
@@ -301,6 +309,7 @@ class DshGoPanel {
     this.ready = true,
     this.live = false,
     this.micro,
+    this.presentation = page,
   });
 
   static DshGoPanel? fromJson(Object? json) {
@@ -320,12 +329,22 @@ class DshGoPanel {
       ready: asBool(map['ready']) ?? true,
       live: asBool(map['live']) ?? false,
       micro: asString(map['micro']),
+      presentation: asString(map['presentation']) == sheet ? sheet : page,
     );
   }
 
   static const sessionTab = 'session.tab';
   static const features = 'features';
   static const chatPanel = 'chat.panel';
+
+  /// The plugin's own detail page, under its settings.
+  static const pluginPage = 'plugin';
+
+  /// How it opens: a pushed page, or a sheet over what the person was doing.
+  static const page = 'page';
+  static const sheet = 'sheet';
+
+  final String presentation;
 
   final String id;
   final String title;
@@ -354,6 +373,9 @@ class DshGoPlugin {
     this.messageActions = const [],
     this.strips = const [],
     this.panels = const [],
+    this.composerTools = const [],
+    this.sessionActions = const [],
+    this.turnNotes = const [],
     this.issues = const [],
     this.capabilities = const {},
     this.media = const [],
@@ -382,6 +404,12 @@ class DshGoPlugin {
       messageActions: list(DshGoSurfaces.messageActions, DshGoAction.fromJson),
       strips: list(DshGoSurfaces.composerStrip, DshGoStrip.fromJson),
       panels: list(DshGoSurfaces.panels, DshGoPanel.fromJson),
+      composerTools: list(DshGoSurfaces.composerTools, DshGoAction.fromJson),
+      sessionActions: list(DshGoSurfaces.sessionActions, DshGoAction.fromJson),
+      turnNotes: [
+        for (final item in asListOrEmpty(contributes[DshGoSurfaces.turnNote]))
+          if (asMap(item) case final note? when asBool(note['ready']) ?? false) ?asString(note['id']),
+      ],
       issues: [for (final item in asListOrEmpty(map['issues'])) ?DshGoIssue.fromJson(item)],
       capabilities: asStringList(map['capabilities']).where(dshGoFeatures.contains).toSet(),
       media: list('media', dshGoResourceId).take(2).toList(),
@@ -402,6 +430,11 @@ class DshGoPlugin {
 
   /// `ok`, `degraded`, `unsupported`, `needs-app`, `invalid`.
   final String state;
+
+  /// The ＋ panel's tools, the conversation's actions, and the ready per-turn notes' ids.
+  final List<DshGoAction> composerTools;
+  final List<DshGoAction> sessionActions;
+  final List<String> turnNotes;
 
   /// [state] is `ok`: the native part shows. Otherwise the contributions are
   /// empty and the app falls back to the web.

@@ -14,6 +14,7 @@ import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../chat/support/harness.dart';
 
@@ -106,6 +107,8 @@ Future<void> _close(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   for (final format in ConversationFormat.values) {
     testWidgets('reopened ${format.name} save keeps the first native worker source', (tester) async {
       final cache = Directory.systemTemp.createTempSync('conversation-save-');

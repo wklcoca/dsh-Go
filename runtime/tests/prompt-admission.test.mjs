@@ -31,19 +31,20 @@ function deferred() {
   const promise = new Promise(yes => { resolve = yes; });
   return { promise, resolve };
 }
-function fixture(t, { failFirst = false } = {}) {
+async function fixture(t, { failFirst = false } = {}) {
   const ctx = new Context();
   t.after(() => ctx.fiber.dispose());
   const projections = new SessionProjectionRegistry(ctx);
-  projections.register(inboxProjectionDefinition);
+  const projection = await projections.register(inboxProjectionDefinition);
   const session = Session.create('concurrent-prompt');
   const dispatch = { emit() {}, waterfall: async (_type, _args, fallback) => fallback() };
-  const inbox = new ReactLoopInbox(projections, session, dispatch);
+  const inbox = new ReactLoopInbox(projection.readerFor(session), session, dispatch);
   // Use actual send/followup/steer/step methods; scheduler waking and model I/O are controlled.
   const agent = Object.assign(Object.create(ReactLoopAgent.prototype), {
     id: session.id, session, inbox, dispatch,
     phase: { kind: 'maintenance', abort: new AbortController() },
-    options: { provider: 'fixture', model: 'image' },
+    options: {},
+    model: { current: () => ({ provider: 'fixture', model: 'image' }) },
     wakeDriver() {},
     loopCtx: {
       get() {}, systemPrompt: { refreshContext: assembly => assembly },
@@ -79,7 +80,6 @@ function fixture(t, { failFirst = false } = {}) {
     },
   };
   const agents = new ApiSessionAgentController(host);
-  agents.selections.set(agent, { current: { provider: 'fixture', model: 'image' } });
   const controller = new SessionCommandController(host, agents, '/fixture');
   const submit = (requestId, mode = 'followup') => controller.prompt({
     sessionId: session.id, requestId, mode,
@@ -104,14 +104,14 @@ function fixture(t, { failFirst = false } = {}) {
     while (inbox.hasPending) {
       agent.phase = { kind: 'running', turn: ++turn, step: 0, abort: new AbortController() };
       const messages = inbox.claim('next-turn', turn);
-      await assert.rejects(agent.step({ messages, assembly: { sections: [], contexts: [], variables: {}, tools: [] } }), /controlled stop before model stream/);
+      await assert.rejects(agent.step({ messages, selection: { provider: 'fixture', model: 'image' }, assembly: { sections: [], contexts: [], variables: {}, tools: [] } }), /controlled stop before model stream/);
     }
     return session.snapshotEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'user');
   }
   return { overlap, submit, inbox, session, counts, commitPending };
 }
 for (const mode of ['followup', 'steer']) test(`overlapping ${mode} image retries commit one business input`, async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const results = await f.overlap('same-id', mode);
   assert.deepEqual(results, { first: { value: { accepted: true } }, second: { accepted: true } });
   assert.equal(f.inbox.nextTurn.length + f.inbox.nextStep.length, 1);
@@ -126,14 +126,14 @@ for (const mode of ['followup', 'steer']) test(`overlapping ${mode} image retrie
   assert.equal(f.counts.admissions, 2, 'durable message still satisfies the existing early dedup check');
 });
 test('different request IDs remain distinct after overlapping admission', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   assert.deepEqual(await f.overlap('different-id'), { first: { value: { accepted: true } }, second: { accepted: true } });
   assert.equal(f.counts.bindings, 2);
   assert.equal(f.inbox.nextTurn.length, 2);
   assert.deepEqual((await f.commitPending()).map(event => event.data.source.rpcId), ['same-id', 'different-id']);
 });
 test('failed first storage admission does not suppress a queued same-ID retry', async t => {
-  const f = fixture(t, { failFirst: true });
+  const f = await fixture(t, { failFirst: true });
   const result = await f.overlap();
   assert(result.first.error);
   assert.deepEqual(result.second, { accepted: true });

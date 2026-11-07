@@ -267,7 +267,8 @@ export function createPluginConfig(ctx,{readBody,send}){
  function token(row,layer){const e=row.entry;return createHmac('sha256',key).update(JSON.stringify([identity(e),identity(e.fiber),identity(e.fiber?.runtime),generations.get(e.fiber)??0,row.origin.proof,row.graph,e.options.config??{},layer.inherited,layer.override,row.summary.writable])).digest('base64url');}
  async function snapshot(id){const row=await locate(id),layer=service().configuration().find(x=>x.entry===row.entry);if(!layer)throw fault(404,'entry-unavailable');
   let inherited=layer.inherited;try{inherited=row.schema(inherited);}catch{}
-  const resolved=plain(row.entry.fiber.config),value=project(row.graph,row.graph.uid,resolved)??{};
+  // Cordis 4.1 retains raw input in config; effectiveConfig is the running value.
+  const fiber=row.entry.fiber,resolved=plain('effectiveConfig'in fiber?fiber.effectiveConfig:fiber.config),value=project(row.graph,row.graph.uid,resolved)??{};
   return {row,layer,body:{v:1,entryId:id,kind:'plugin',owner:row.origin.owner,bundle:row.origin.bundle,source:row.origin.source,revision:token(row,layer),schema:cleanSchema(row.graph),value,base:project(row.graph,row.graph.uid,plain(inherited))??{},user:project(row.graph,row.graph.uid,plain(layer.override))??{},secrets:secretFacts(row.graph,row.entry.options.config,resolved),writable:row.summary.writable}};
  }
  async function update(id,input){

@@ -40,6 +40,7 @@ async function ask(env: Env): Promise<number | null> {
   try {
     const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}`, { headers, signal: AbortSignal.timeout(5000) });
     if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
       console.error('github stars', res.status);
       return null;
     }

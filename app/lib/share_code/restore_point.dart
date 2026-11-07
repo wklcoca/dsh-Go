@@ -107,16 +107,16 @@ class RestorePoint {
     fs.writeSkill(skill);
   }
 
-  /// Copies the imported-AGENTS.md text into a new directory beside [backup].
+  /// Copies the original AGENTS.md bytes into a new directory beside [backup].
   Future<void> backupAgentsMd(String backup) async {
-    final text = await fs.readImportedAgentsMd();
-    if (text == null) return;
+    final source = fs.file(GuestFs.importedAgentsMd);
+    if (!source.existsSync()) return;
     final parent = fs.dir(backup).parent;
     parent.createSync(recursive: true);
     // Two imports may share the timestamp; each copy owns a fresh directory.
     final prefix = backup.substring(backup.lastIndexOf('/') + 1);
     final saved = parent.createTempSync('$prefix-');
     final target = File('${saved.path}/AGENTS.md');
-    target.writeAsStringSync(text);
+    source.copySync(target.path);
   }
 }

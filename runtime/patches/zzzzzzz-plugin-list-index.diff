@@ -1,6 +1,6 @@
 --- a/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
-@@ -1800,15 +1800,26 @@
+@@ -2246,15 +2246,26 @@
  		*/
  		async listPlugins() {
  			const rows = flatten(composeEntries([readProfilePatches("dsh", this.profile)]));
@@ -23,7 +23,7 @@
 +				const actual = actualById.get(entry.entryId);
 +				const candidates = candidatesById.get(actual?.options.id);
 +				const candidate = candidates?.first;
- 				if (protectedModules.has(entry.moduleName) || entry.entryId === this.ownerEntryId) return {
+ 				if (PROTECTED_PLUGINS.has(entry.moduleName) || entry.entryId === this.ownerEntryId) return {
  					...entry,
  					readOnlyReason: "management-required"
  				};

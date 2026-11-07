@@ -16,13 +16,13 @@ export function expectedView(path,text,cap,range){
 export async function fixture(prefix,cap=16000){
  const require=createRequire(join(resolve(prefix),'package.json'));
  const load=async name=>import(pathToFileURL(require.resolve('@deepseek-ai/'+name)));
- const [{Context},{SystemPrompt},{ToolRuntime},{LocalFileSystem},api]=await Promise.all(['cordis','dsh-system-prompt','dsh-tools','dsh-fs-local','dsh-tool-str-replace-editor'].map(load));
+ const [{Context},{SystemPrompt},{ToolRuntime},{LocalFileSystem},api,native]=await Promise.all(['cordis','dsh-system-prompt','dsh-tools','dsh-fs-local','dsh-tool-str-replace-editor','dsh-tool-executor-native'].map(load));
  const root=await mkdtemp(join(tmpdir(),'dsh-view-format-'));const path=join(root,'file.txt');
- const ctx=new Context();await ctx.plugin(SystemPrompt,{});await ctx.plugin(ToolRuntime,{});await ctx.plugin(LocalFileSystem,{cwd:root});
+ const ctx=new Context();await ctx.plugin(SystemPrompt,{});await ctx.plugin(ToolRuntime,{});await ctx.plugin(native);await ctx.plugin(LocalFileSystem,{cwd:root});
  await ctx.plugin({inject:['tools','fs'],apply(scope){api.apply(scope,{maxOutputChars:cap});}});
  let observations=0;ctx.on('fs/observed',()=>{observations++;});
  return {ctx,path,cap,get observations(){return observations;},reset:text=>writeFile(path,text,'utf8'),
-  async view(range){return ctx.tools.execute({name:'str_replace_editor',arguments:{command:'view',path,...(range===undefined?{}:{view_range:range})},callId:'view-fixture',signal:new AbortController().signal});},
+  async view(range){const batch=await ctx.tools.execute({calls:[{id:'view-fixture',name:'str_replace_editor',arguments:JSON.stringify({command:'view',path,...(range===undefined?{}:{view_range:range})})}],signal:new AbortController().signal});return batch.results[0].result;},
   close:async()=>{await ctx.fiber.dispose();await rm(root,{recursive:true,force:true});},
  };
 }

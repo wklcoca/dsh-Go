@@ -114,7 +114,9 @@ class RemoteRpcClient {
     }
     // Do not await the write: a deadline or close must settle the RPC even
     // when the send never completes.
-    _channel.send(encoded).catchError((Object error) {
+    // An earlier send can keep this request queued beyond its deadline.
+    // Retire it before encoding its first Noise fragment, never between them.
+    _channel.send(encoded, canSend: () => _pending.containsKey(request.id)).catchError((Object error) {
       _reject(
         request.id,
         error is SecureChannelException && error.code == 'FRAME_TOO_LARGE'

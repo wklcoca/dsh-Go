@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const base = join(resolve(process.env.DSH_PREFIX), 'node_modules/@deepseek-ai');
-const { boot, OFFICIAL_ON_DEMAND_CATALOG } = await import(pathToFileURL(join(base, 'dsh-app-boot/lib/index.js')));
+const { boot } = await import(pathToFileURL(join(base, 'dsh-app-boot/lib/index.js')));
+const { OFFICIAL_ON_DEMAND_CATALOG } = await import(pathToFileURL(join(base, 'dsh-official-bundles/lib/index.js')));
 
 async function fixture(t, count) {
   const root = await mkdtemp(join(tmpdir(), 'bundle-membership-'));

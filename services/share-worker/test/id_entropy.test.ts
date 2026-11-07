@@ -123,12 +123,14 @@ describe('ID entropy consumption', () => {
   it('uploads through Worker.fetch with an independent deletion token and collision retry', async () => {
     const ctx = makeEnv();
     const random = vi.spyOn(crypto, 'getRandomValues');
-    const existing = { key: 'collision', size: 64, uploaded: new Date(), customMetadata: {}, httpEtag: '"old"' };
-    const head = vi.spyOn(ctx.bucket, 'head').mockResolvedValueOnce(existing);
+    const head = vi.spyOn(ctx.bucket, 'head');
+    const put = vi.spyOn(ctx.bucket, 'put').mockResolvedValueOnce(null);
     const res = await worker.fetch(uploadRequest(), ctx.env);
     expect(res.status).toBe(201);
     const out = await res.json() as { id: string; deleteToken: string };
-    expect(head).toHaveBeenCalledTimes(2);
+    expect(head).not.toHaveBeenCalled();
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(put.mock.calls.every(([, , options]) => options.onlyIf?.get('If-None-Match') === '*')).toBe(true);
     expect(tierOfId(out.id)?.ttl).toBe('7d');
     expect(out.deleteToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(random.mock.calls.filter(([a]) => a!.byteLength === 32)).toHaveLength(1);
@@ -136,20 +138,20 @@ describe('ID entropy consumption', () => {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(out.deleteToken));
     const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
     expect(ctx.bucket.objects.get('7d/' + out.id)?.customMetadata.dt).toBe(hash);
-    console.log(JSON.stringify({ uploadHeads: head.mock.calls.length,
+    console.log(JSON.stringify({ uploadHeads: head.mock.calls.length, uploadPuts: put.mock.calls.length,
       idEntropyCalls: random.mock.calls.filter(([a]) => a!.byteLength === 16).length, deleteEntropyCalls: 1 }));
   });
 
   it('still stops after four occupied IDs without storing a new object', async () => {
     const ctx = makeEnv();
-    const head = vi.spyOn(ctx.bucket, 'head').mockResolvedValue({
-      key: 'occupied', size: 1, uploaded: new Date(), customMetadata: {}, httpEtag: '"old"',
-    });
-    const put = vi.spyOn(ctx.bucket, 'put');
+    const head = vi.spyOn(ctx.bucket, 'head');
+    const put = vi.spyOn(ctx.bucket, 'put').mockResolvedValue(null);
     const res = await worker.fetch(uploadRequest(), ctx.env);
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'try_again' });
-    expect(head).toHaveBeenCalledTimes(4);
-    expect(put).not.toHaveBeenCalled();
+    expect(head).not.toHaveBeenCalled();
+    expect(put).toHaveBeenCalledTimes(4);
+    expect(put.mock.calls.every(([, , options]) => options.onlyIf?.get('If-None-Match') === '*')).toBe(true);
+    expect(ctx.bucket.objects.size).toBe(0);
   });
 });

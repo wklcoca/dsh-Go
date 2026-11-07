@@ -7,15 +7,15 @@ import { randomBytes } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, sep } from "node:path";
 import { normalize as normalizeEffects, splitPending } from "./effects.js";
-import { ID, PKG, PROTOCOL, SEMVER } from "./limits.js";
+import { ID, NEGOTIATED_PLACEMENTS, PKG, PROTOCOL, SEMVER } from "./limits.js";
 import { insidePackage, panelTitle } from "./manifest.js";
 import { acceptUpgrade } from "./ws.js";
 import { LOCALE, call, errorText, isPlainObject, normalizeScope, toJson, utf8Bytes, viewStats, withTimeout } from "./util.js";
 
 export const STREAM_PATH = "/dsh-go/v1/stream";
 const BASE = "/dsh-go/v1/";
-const SURFACE_KEYS = { "composer.actions": "composer.actions", "message.actions": "message.actions", "composer.strip": "composer.strip", panel: "panels" };
-const CONTEXT_FOR = { "composer.actions": ["draft", "clipboard"], "message.actions": ["message"] };
+const SURFACE_KEYS = { "composer.actions": "composer.actions", "message.actions": "message.actions", "composer.strip": "composer.strip", panel: "panels", "composer.tools": "composer.tools", "session.actions": "session.actions" };
+const CONTEXT_FOR = { "composer.actions": ["draft", "clipboard"], "composer.tools": ["draft", "clipboard"], "message.actions": ["message"] };
 const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
 const SUB_ID = /^.{1,32}$/su;
 
@@ -53,6 +53,7 @@ function parseCaps(sp) {
   const surfaces = list("surfaces");
   const components = list("components");
   const features = featuresOf(list("features"));
+  const placements = surfaces.filter((s) => NEGOTIATED_PLACEMENTS.includes(s));
   return {
     versions,
     app,
@@ -60,7 +61,7 @@ function parseCaps(sp) {
     surfaces,
     components,
     features,
-    key: JSON.stringify([versions, app, locale.toLowerCase(), ...(features.length ? [features] : [])]),
+    key: JSON.stringify([versions, app, locale.toLowerCase(), ...(features.length ? [features] : []), ...(placements.length ? [placements] : [])]),
     forPlugin: () => ({ protocol: PROTOCOL, app, locale, surfaces: [...surfaces], components: [...components], ...(features.length ? { features: [...features] } : {}) }),
   };
 }
@@ -172,6 +173,7 @@ export function createNativeRoutes(core) {
     }
     if (!isPlainObject(view)) fail(500, "invalid-view", "static view must be an object");
     const json = toJson(view);
+    if (json && json.bytes > L.viewBytes) fail(500, "invalid-view", `static view exceeds ${L.viewBytes} bytes`);
     const normalized = json && { value: json.value, bytes: json.bytes };
     staticViews.set(file, { stamp, view: normalized });
     return normalized;
@@ -285,7 +287,7 @@ export function createNativeRoutes(core) {
     if (body.userGesture !== undefined && typeof body.userGesture !== "boolean") fail(400, "bad-request", "userGesture must be a boolean");
 
     const rec = pluginOrFail(body.pkg);
-    const item = rec.parsed.items[surfaceKey].find((x) => x.id === body.id);
+    const item = rec.parsed.items[surfaceKey]?.find((x) => x.id === body.id);
     if (item === undefined) fail(404, "not-found", `${body.pkg} declares no ${body.surface} ${body.id}`);
     const capabilityConn = connById.get(body.stream);
     if (!(item.requires ?? []).every(x => capabilityConn?.features?.includes(x))) fail(409, "unsupported", "action requires negotiated capabilities");
@@ -326,9 +328,21 @@ export function createNativeRoutes(core) {
     const event = { surface: body.surface, id: body.id, locale, signal: controller.signal };
     if (body.action !== undefined) event.action = body.action;
     if (body.value !== undefined) event.value = body.value;
-    let result;
+    let result, deferred;
     try {
-      result = await withTimeout(call(fn, arg, event), L.handlerTimeoutMs);
+      ({ result, deferred } = await withTimeout(call(fn, arg, event).then(result => {
+        const deferred = splitPending(result);
+        // Own eager work even if the outer handler finishes after its deadline.
+        // Assimilate a thenable once; later delivery consumes this same Promise.
+        // Never start lazy work, and never mutate the plugin's result object.
+        const work = deferred?.ok ? deferred.work : deferred ? result.result : undefined;
+        if (typeof work !== "function" && typeof work?.then === "function") {
+          const owned = Promise.resolve(work);
+          owned.then(undefined, () => {});
+          if (deferred.ok) deferred.work = owned;
+        }
+        return { result, deferred };
+      }), L.handlerTimeoutMs));
     } catch (error) {
       controller.abort();
       if (!current()) return rejectStale();
@@ -339,14 +353,6 @@ export function createNativeRoutes(core) {
       release();
     }
     const panels = new Set(rec.parsed.items.panels.map((p) => p.id));
-    const deferred = splitPending(result);
-    // Invalid metadata still leaves the route owning an already-started Promise.
-    // The validator omits work on rejection; never start a refused lazy function.
-    if (deferred !== undefined && !deferred.ok) {
-      const work = result.result;
-      if (typeof work?.then === "function") work.then(undefined, () => {});
-    }
-    if (!current() && typeof deferred?.work?.then === "function") deferred.work.then(undefined, () => {});
     if (!current()) return rejectStale();
     if (deferred !== undefined) {
       return startPending(res, { pkg: body.pkg, id: body.id, streamId: body.stream, scope, panels, source: isPanel ? body.id : undefined, controller, deferred, current, filterPatches });
@@ -471,6 +477,7 @@ export function createNativeRoutes(core) {
       return;
     }
     const bytes = await readFile(file);
+    if (bytes.length > L.assetBytes) fail(404, "not-found", "no such asset");
     res.writeHead(200, { ...headers, "content-length": bytes.length });
     res.end(req.method === "HEAD" ? undefined : bytes);
   }
@@ -590,8 +597,10 @@ export function createNativeRoutes(core) {
     if (state === "degraded") return end("degraded");
     if (state !== "ok") return end("not-native");
     const declared = rec.parsed.ids.get(msg.id);
-    if (declared !== "panels" && declared !== "composer.strip") return end("not-found");
-    const feed = core.feed(msg.pkg, msg.id, declared === "panels" ? "panel" : "strip", scope, conn.locale);
+    if (declared !== "panels" && declared !== "composer.strip" && declared !== "turn.note") return end("not-found");
+    // A turn's note belongs to a conversation.
+    if (declared === "turn.note" && scope.scope.sessionId === undefined) return end("not-found");
+    const feed = core.feed(msg.pkg, msg.id, declared === "panels" ? "panel" : declared === "turn.note" ? "note" : "strip", scope, conn.locale);
     if (feed === undefined) return end("limit");
     const sub = {
       id: msg.sub,

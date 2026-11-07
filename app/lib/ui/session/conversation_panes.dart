@@ -94,7 +94,9 @@ class ConversationPane {
     // The page's tab holds native panels too: those are listed on their own here.
     final pages = ref.watch(sessionPluginPlanProvider(sessionId)).visible.any((item) => item.mode != SeatMode.native);
     return [
-      for (final panel in ref.watch(nativePanelsProvider)) ofNative(panel),
+      // One that asked only for its detail page stays there.
+      for (final panel in ref.watch(nativePanelsProvider))
+        if (panel.placement.any((p) => p != DshGoPanel.pluginPage)) ofNative(panel),
       if (webParts) webPlugins else if (pages) ofTab(SessionTab.plugins),
     ];
   }

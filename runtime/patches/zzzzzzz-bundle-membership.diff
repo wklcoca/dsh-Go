@@ -1,6 +1,6 @@
 --- a/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
-@@ -1827,6 +1827,7 @@
+@@ -2280,6 +2280,7 @@
  			const manifest = readProfileManifest("dsh", this.profile.dir);
  			const exemptions = readProfileVersionExemptions(this.profile.dir);
  			const selected = bundleSelection(manifest);
@@ -8,7 +8,7 @@
  			const recorded = manifest.dependencies ?? {};
  			const dependencies = Object.keys(recorded);
  			const installation = JSON.parse(readFileSync(this.profile.installAnchor, "utf8"));
-@@ -1840,9 +1841,9 @@
+@@ -2293,9 +2294,9 @@
  			const bundles = [];
  			const runtimeVersion = getDshRuntimeVersion();
  			for (const name of names) {

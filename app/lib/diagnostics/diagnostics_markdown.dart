@@ -27,6 +27,7 @@ String diagnosticsMarkdown(DiagnosticsSnapshot s, {int maxBytes = diagnosticsMar
     ..writeln();
   _environment(b, s);
   _connection(b, s);
+  _phone(b, s);
   _performance(b, s);
   _errors(b, s);
   _log(b, '引擎日志（尾部）', s.engineLog, diagnosticsEngineLines);
@@ -115,6 +116,19 @@ void _connection(StringBuffer b, DiagnosticsSnapshot s) {
     for (final e in entries) {
       b.writeln('- ${e.key}：${e.value}');
     }
+  }
+  b.writeln();
+}
+
+void _phone(StringBuffer b, DiagnosticsSnapshot s) {
+  b.writeln('## 手机操控（本机）');
+  final phone = s.phone;
+  if (!phone.ready) {
+    b.writeln('- 手机状态不可用');
+  } else {
+    b
+      ..writeln('- 手机操控开关：${phone.enabled} · 桥接监听：${phone.bridgeListening}')
+      ..writeln('- 无障碍开关：${phone.a11y.enabled} · 服务已连接：${phone.a11y.serviceConnected}');
   }
   b.writeln();
 }

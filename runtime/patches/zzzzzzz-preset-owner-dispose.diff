@@ -1,6 +1,6 @@
 --- a/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/index.js
-@@ -652,6 +652,7 @@
+@@ -668,6 +668,7 @@
  			}
  		}
  		async bind(ctx, generation) {

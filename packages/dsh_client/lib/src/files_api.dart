@@ -83,7 +83,9 @@ extension DshFilesApi on DshClient {
   /// when the size is known. [onProgress] gets (received, total?).
   /// Failures are [DshRemoteException]s with `workspace-file/*` codes
   /// (`not-found`, `not-allowed`, `too-large`, `unsupported`), or the
-  /// carrier's transport errors.
+  /// carrier's transport errors. A changed non-empty window version fails locally
+  /// with `workspace-file/changed` before delivering that window. Missing versions
+  /// remain compatible; this check does not provide an atomic file snapshot.
   Future<int> readFile(
     String sessionId,
     String path, {
@@ -110,7 +112,15 @@ extension DshFilesApi on DshClient {
     }
 
     try {
-      return await _readWindows(sessionId, path, sink, onProgress, maxBytes, total);
+      return await _readWindows(
+        sessionId,
+        path,
+        sink,
+        onProgress,
+        maxBytes,
+        total,
+        stat.version.isEmpty ? null : stat.version,
+      );
     } on DshProtocolException {
       // An HTTP answer this client cannot decode: the plain file route, if
       // nothing has been handed out yet.
@@ -153,6 +163,7 @@ extension DshFilesApi on DshClient {
     void Function(int received, int? total)? onProgress,
     int? maxBytes,
     int? total,
+    String? expectedVersion,
   ) async {
     var offset = 0;
     while (true) {
@@ -165,6 +176,13 @@ extension DshFilesApi on DshClient {
           },
         }),
       );
+      final version = asString(value['version']);
+      if (version != null && version.isNotEmpty) {
+        if (expectedVersion != null && version != expectedVersion) {
+          throw DshRemoteException('workspace-file/changed', '"$path" changed while reading', {'path': path});
+        }
+        expectedVersion ??= version;
+      }
       final data = _bytesOf(value['data']);
       offset += data.length;
       if (maxBytes != null && offset > maxBytes) {

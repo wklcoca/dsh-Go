@@ -9780,6 +9780,21 @@ class L10nZh extends L10n {
   String get phoneDirectEngine => '直接启动本机引擎';
 
   @override
+  String get phoneRootMode => 'Root 模式（实验）';
+
+  @override
+  String get phoneRootModeHint => '用 su 以真 root 启动容器；需 KernelSU/Magisk 授权，重启引擎后生效。';
+
+  @override
+  String get phoneRootNeedsRoot => '未检测到 su——需要先 root 设备';
+
+  @override
+  String get phoneRootStopFirst => '请先停止引擎再切换';
+
+  @override
+  String get phoneRootChangeFailed => '切换 Root 模式失败';
+
+  @override
   String get phoneDirectHint => '实验功能，默认关闭，下次启动生效。部分手机（例如 Android 16）会拦截直接启动，届时自动改用兼容启动，数据不受影响。';
 
   @override

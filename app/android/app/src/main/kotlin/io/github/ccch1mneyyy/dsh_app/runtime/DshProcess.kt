@@ -68,6 +68,10 @@ class DshProcess(
     var direct: Boolean = false
         private set
 
+    /** EXPERIMENTAL: this process was launched through su so proot runs as real uid 0. */
+    var rootMode: Boolean = false
+        private set
+
     val launchDiagnostics = LaunchDiagnostics()
     val executionMode: String? get() = launchDiagnostics.currentMode(process?.isAlive == true)
 
@@ -78,9 +82,11 @@ class DshProcess(
      * [binds] are extra proot `-b host:guest` mounts, inserted before the guest command.
      * [safe] boots the rescue profile instead of `web` (see [SafeMode.profileArg]).
      */
-    fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
+    fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, rootEnabled: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
         check(process == null) { "already started" }
+        rootMode = rootEnabled && !safe && RootMode.available() && RootMode.granted()
         var selection = DirectLaunch.select(rootfs, directEngine, safe, directFailed)
+        if (rootMode) selection = DirectLaunch.Selection(false, null)
         // Only PRoot's fake hard links stand in Direct's way: tidy them once no runtime process is left.
         val tidy = selection.fallbackReason == DirectLaunch.INCOMPATIBLE
         val cleanup = reapStrays(allowObservationGap = !selection.direct && !tidy)
@@ -112,7 +118,11 @@ class DshProcess(
         val argv = ArrayList<String>()
         val sameBind = DirectLaunch.samePathBind(rootfs)
         val launchArgv = DirectLaunch.prootArguments(rootfs, manifest.launchArgv, direct)
-        val allBinds = binds.filterNot { expand(it) == sameBind }.distinct()
+        val rootBinds = if (rootMode) {
+            File(rootfs, "host-data").mkdirs()
+            listOf("/data:/host-data")
+        } else emptyList()
+        val allBinds = (binds + rootBinds).filterNot { expand(it) == sameBind }.distinct()
         // PRoot's Node resolves through glibc, which fails A with a refused AAAA (#152): add Direct's resolver.
         val effectiveGuestEnv = guestEnv + ("DSH_GO_RUNTIME_ROOT" to rootfs.canonicalPath) +
             listOfNotNull(if (direct) null else "NODE_OPTIONS" to DirectLaunch.prootNodeOptions(guestEnv["NODE_OPTIONS"]))
@@ -163,6 +173,17 @@ class DshProcess(
         env["PROOT_TMP_DIR"] = tmp.absolutePath
         manifest.launchEnv.forEach { (k, v) -> env[k] = expand(v) }
         if (!guestEnvPlaced) env.putAll(effectiveGuestEnv)
+        if (rootMode) {
+            val su = RootMode.suPath()
+            if (su == null) {
+                rootMode = false
+            } else {
+                builder.command(listOf(su, "-c", RootMode.commandWithEnv(argv, env.toMap())))
+                env.clear()
+                env["PATH"] = "/system/bin:/system/xbin"
+                listener.onLog("[dsh-app] root mode: launching proot via su", "system")
+            }
+        }
         if (direct) {
             val plan = DirectLaunch.prepare(rootfs, manifest.abi, argv, env.toMap())
             builder.command(plan.argv).directory(plan.cwd)
@@ -174,7 +195,7 @@ class DshProcess(
         if (directFallbackReason == DirectLaunch.INCOMPATIBLE) listener.onLog("[dsh-app] direct fallback: proot hard-link backing files need compatible launch; user preference and data retained", "system")
         if (directFallbackReason == DirectLaunch.FAILED) listener.onLog("[dsh-app] direct fallback: direct launch failed before with this runtime; turn Direct on again to retry", "system")
         listener.onLog("[dsh-app] launch method: ${if (direct) "direct-glibc" else "proot"}${if (directEngine && safe) " (safe recovery)" else ""}", "system")
-        listener.onLog("[dsh-app] launching ${builder.command().joinToString(" ") { redact(it) }}", "system")
+        listener.onLog("[dsh-app] launching ${if (rootMode) "proot via su (env hidden)" else builder.command().joinToString(" ") { redact(it) }}", "system")
         // stop() came in while this was being prepared: don't launch at all.
         if (stopping) {
             listener.onExit(this, 0, true)
@@ -284,6 +305,11 @@ class DshProcess(
         val p = process ?: return
         stopper = thread(name = "dsh-stop", isDaemon = true) {
             try {
+                if (rootMode) {
+                    pidHint()?.let { RootMode.kill(it, OsConstants.SIGTERM) }
+                    Thread.sleep(250)
+                    RootMode.killProot(rootfs, OsConstants.SIGQUIT)
+                }
                 val node = if (p.isAlive) guestRecord() else null
                 val proot = if (direct) null else node?.let { child -> processSnapshot().records.firstOrNull { it.pid == child.parent && it.proot } }
                 if (node != null) signalOwned(node, OsConstants.SIGTERM)
@@ -329,7 +355,9 @@ class DshProcess(
 
     private fun signalOwned(record: RuntimeProcessRecord, value: Int) = runCatching {
         val current = RuntimeProcessOwnership.stat(File("/proc/${record.pid}/stat").readText())
-        if (current?.second == record.started && Os.stat("/proc/${record.pid}").st_uid == AndroidProcess.myUid()) {
+        if (current?.second != record.started) return@runCatching
+        if (rootMode) { RootMode.kill(record.pid, value); return@runCatching }
+        if (Os.stat("/proc/${record.pid}").st_uid == AndroidProcess.myUid()) {
             Os.kill(record.pid, value)
         }
     }
@@ -412,6 +440,10 @@ class DshProcess(
     }
 
     private fun reapStraysLocked(allowObservationGap: Boolean): CleanupResult {
+        if (rootMode) {
+            val clean = RootMode.killStrays(rootfs)
+            return CleanupResult(clean, false, canPruneTemp = false)
+        }
         val myPid = AndroidProcess.myPid()
         val roots = setOf(rootfs.absolutePath, rootfs.canonicalPath)
         val hinted = pidHint()?.let { setOf(it) }.orEmpty()

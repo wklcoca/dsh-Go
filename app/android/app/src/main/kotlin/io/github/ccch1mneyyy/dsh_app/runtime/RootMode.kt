@@ -126,6 +126,13 @@ object RootMode {
         return findProotPids(path).isEmpty()
     }
 
+    /** Remove a stale file the app uid cannot unlink (e.g. a root-owned pid file in sticky /tmp). */
+    fun remove(file: File): Boolean = try {
+        val su = suPath() ?: return false
+        ProcessBuilder(su, "-c", "rm -f -- " + quote(file.absolutePath)).start().waitFor() == 0 &&
+            !java.nio.file.Files.exists(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+    } catch (_: Exception) { false }
+
     private fun guestPidHint(rootfs: File): Int? = try {
         File(rootfs, "tmp/dsh-web.pid").readText().trim().toIntOrNull()?.takeIf { it > 0 }
     } catch (_: Exception) { null }

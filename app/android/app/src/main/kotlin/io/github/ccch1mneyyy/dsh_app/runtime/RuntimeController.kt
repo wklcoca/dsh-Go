@@ -148,6 +148,9 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         "directEngineAvailable" to directEngineAvailable(),
         "directEngineActive" to (process?.executionMode == "direct"),
         "directEngineFallbackReason" to lastLaunch?.fallbackReason,
+        "rootModeEnabled" to rootModeEnabled(),
+        "rootModeAvailable" to RootMode.available(),
+        "rootModeActive" to (process?.rootMode == true),
         "currentExecutionMode" to process?.executionMode,
         "launchSelectedMode" to lastLaunch?.selectedMode,
         "launchSpawned" to (lastLaunch?.spawned == true),
@@ -196,6 +199,16 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 main.post { onDone(e) }
             }
         }
+    }
+
+    private fun rootModeEnabled(): Boolean = prefs.getBoolean(K_ROOT_MODE, false)
+
+    /** Experimental: launch proot through su as real uid 0. Takes effect on the next start. */
+    @Synchronized fun setRootMode(enabled: Boolean) {
+        check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before changing root mode" }
+        check(!enabled || RootMode.available()) { "this device has no root (su)" }
+        prefs.edit().putBoolean(K_ROOT_MODE, enabled).apply()
+        emitStatus()
     }
 
     /** While a process is up: its mode; otherwise the mode the next start will use. */
@@ -501,7 +514,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 }
                 timeline.spawned()
                 val direct = directEngine()
-                p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay) { actualDirect ->
+                p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay, rootEnabled = rootModeEnabled()) { actualDirect ->
                     // SafeMode.prepare writes its own briefing; leave the original home untouched.
                     if (!safe) GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
                 }
@@ -1092,6 +1105,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         private const val K_DIRECT_ENGINE = "directEngine"
         /** Runtime version Direct failed to launch with (see [SafePolicy.directLaunchFailed]). */
         private const val K_DIRECT_FAILED = "directEngineFailedRuntime"
+        private const val K_ROOT_MODE = "rootMode"
         private const val MAIN_FAILURE_LOG = "failure-normal.log"
         private const val LATEST_FAILURE_LOG = "failure-latest.log"
 

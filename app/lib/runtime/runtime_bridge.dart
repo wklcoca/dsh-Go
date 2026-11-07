@@ -166,6 +166,9 @@ class RuntimeStatus {
     this.directEngineAvailable = false,
     this.directEngineActive = false,
     this.directEngineFallbackReason,
+    this.rootModeEnabled = false,
+    this.rootModeAvailable = false,
+    this.rootModeActive = false,
     this.currentExecutionMode,
     this.launchSelectedMode,
     this.launchSpawned = false,
@@ -224,6 +227,11 @@ class RuntimeStatus {
   final bool directEngineActive;
   final String? directEngineFallbackReason;
 
+  /// Experimental real-root launch (needs su). A change applies on the next engine start.
+  final bool rootModeEnabled;
+  final bool rootModeAvailable;
+  final bool rootModeActive;
+
   /// Native process observation, never inferred from the saved direct preference.
   final String? currentExecutionMode;
 
@@ -241,6 +249,9 @@ class RuntimeStatus {
     'directEngineAvailable': directEngineAvailable,
     'directEngineActive': directEngineActive,
     'directEngineFallbackReason': directEngineFallbackReason,
+    'rootModeEnabled': rootModeEnabled,
+    'rootModeAvailable': rootModeAvailable,
+    'rootModeActive': rootModeActive,
     'currentExecutionMode': currentExecutionMode,
     'launchSelectedMode': launchSelectedMode,
     'launchSpawned': launchSpawned,
@@ -293,6 +304,9 @@ class RuntimeStatus {
     directEngineAvailable: map['directEngineAvailable'] == true,
     directEngineActive: map['directEngineActive'] == true,
     directEngineFallbackReason: map['directEngineFallbackReason'] as String?,
+    rootModeEnabled: map['rootModeEnabled'] == true,
+    rootModeAvailable: map['rootModeAvailable'] == true,
+    rootModeActive: map['rootModeActive'] == true,
     currentExecutionMode: map['currentExecutionMode'] as String?,
     launchSelectedMode: map['launchSelectedMode'] as String?,
     launchSpawned: map['launchSpawned'] == true,
@@ -608,6 +622,9 @@ class RuntimeBridge {
 
   /// Takes effect on the next start; native code rejects changes while active.
   Future<void> setDirectEngine(bool enabled) => _methods.invokeMethod<void>('setDirectEngine', {'enabled': enabled});
+
+  /// Experimental real-root launch; rejected while the engine is active.
+  Future<void> setRootMode(bool enabled) => _methods.invokeMethod<void>('setRootMode', {'enabled': enabled});
 
   /// Output around the last failure, tokens masked.
   Future<List<String>> failureLog() async => (await _methods.invokeListMethod<String>('failureLog')) ?? const [];

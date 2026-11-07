@@ -1,0 +1,105 @@
+# 在 GitHub Actions（x86_64 免费 runner）上构建 dsh-go arm64 APK。
+# dsh-go 的 APK 需要 runtime/out/<abi>/{assets,jniLibs}（repo 里 .gitignore 掉了，
+# 正常要先跑 runtime/build-runtime.sh）。这里复用「官方 APK 里自带的 runtime」跳过它。
+name: build-apk
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: "ABI flavor"
+        type: choice
+        default: arm64
+        options: [arm64, x64]
+  push:
+    branches: ["main", "build/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter 3.47.7
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.7"
+          channel: stable
+          cache: true
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      # settings.gradle.kts 在配置阶段就会读 local.properties 的 flutter.sdk，必须先建
+      - name: Write local.properties (needed by settings.gradle.kts)
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$SDK" "$FLUTTER_ROOT" > app/android/local.properties
+          cat app/android/local.properties
+
+      # app/android/.gitignore 忽略了 gradlew / gradle-wrapper.jar，必须先生成
+      - name: Generate Gradle wrapper
+        working-directory: app/android
+        run: gradle wrapper --gradle-version 9.3.1 --distribution-type all
+
+      - name: Install Android SDK bits + Flutter's NDK
+        run: |
+          set -e
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+          "$SDKM" "platform-tools" "platforms;android-36" "platforms;android-35" "platforms;android-34" \
+                  "build-tools;36.0.0" "build-tools;35.0.0" >/dev/null
+          NDK=$(grep -rhoE 'ndkVersion[[:space:]]*[:=][[:space:]]*"[0-9][0-9.]+"' "$FLUTTER_ROOT/packages/flutter_tools/gradle" 2>/dev/null | grep -oE '[0-9][0-9.]+' | head -1)
+          echo "flutter ndkVersion = ${NDK:-<none>}"
+          if [ -n "$NDK" ] && [ ! -d "$SDK/ndk/$NDK" ]; then "$SDKM" "ndk;$NDK" || true; fi
+
+      - name: Reuse official runtime (skip runtime/build-runtime.sh)
+        run: |
+          set -e
+          curl -fL --retry 3 -o /tmp/official.apk \
+            "https://gh-proxy.com/https://github.com/ccch1mneyyy/dsh-Go/releases/download/v1.0.11/dsh-go-1.0.11-arm64.apk"
+          mkdir -p /tmp/official && (cd /tmp/official && unzip -q /tmp/official.apk)
+          OUT=runtime/out/arm64-v8a
+          mkdir -p "$OUT/assets/runtime" "$OUT/jniLibs/arm64-v8a"
+          cp -a /tmp/official/assets/runtime/. "$OUT/assets/runtime/"
+          for so in libproot.so libproot-loader.so libtalloc.so libandroid-shmem.so; do
+            cp -a "/tmp/official/lib/arm64-v8a/$so" "$OUT/jniLibs/arm64-v8a/$so"
+          done
+          ls -la "$OUT/assets/runtime" | head
+          ls -la "$OUT/jniLibs/arm64-v8a"
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      # The repo-committed merged ARBs/gen can lag the parts; regenerate from parts
+      # with the runner's Flutter (flutter gen-l10n) so the Dart gen matches the code.
+      - name: Generate l10n from parts
+        run: python3 app/tool/l10n_merge.py
+
+      # 签名：无 app/android/key.properties → debug key，只可自测（装不到官方签名版上）。
+      - name: Build APK
+        run: |
+          chmod +x tooling/build-apk.sh
+          tooling/build-apk.sh --release -f "${{ github.event.inputs.flavor || 'arm64' }}"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-go-apk
+          path: app/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30

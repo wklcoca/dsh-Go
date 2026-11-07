@@ -114,8 +114,21 @@ class DshProcess(
         val sameBind = DirectLaunch.samePathBind(rootfs)
         val launchArgv = DirectLaunch.prootArguments(rootfs, manifest.launchArgv, direct)
         val rootBinds = if (rootMode) {
-            File(rootfs, "host-data").mkdirs()
-            listOf("/data:/host-data")
+            // 真 root：把手机 /data 和系统分区映射进容器（proot 绑定可写；erofs 分区物理只读）
+            val hostMounts = listOf(
+                "/data",
+                "/product", "/system_ext", "/vendor", "/odm",
+                "/vendor_dlkm", "/system_dlkm",
+                "/my_product", "/my_bigball", "/my_heytap", "/my_region",
+                "/my_carrier", "/my_company", "/my_stock", "/my_engineering",
+                "/my_manifest", "/my_preload",
+                "/mnt/vendor", "/mnt/opex",
+                "/metadata", "/config", "/linkerconfig", "/data_mirror",
+            )
+            hostMounts.filter { File(it).exists() }.map { host ->
+                File(rootfs, host.removePrefix("/")).mkdirs()
+                "$host:$host"
+            }
         } else emptyList()
         val allBinds = (binds + rootBinds).filterNot { expand(it) == sameBind }.distinct()
         // PRoot's Node resolves through glibc, which fails A with a refused AAAA (#152): add Direct's resolver.

@@ -97,7 +97,11 @@ class DshProcess(
         check(cleanup.complete || (!direct && !cleanup.ownedRemaining)) { "runtime cleanup incomplete; stop the engine and retry" }
         if (!cleanup.complete) listener.onLog("[dsh-app] starting proot with incomplete process observation; no captured runtime identities remain", "system")
         val pidFile = File(rootfs, "tmp/dsh-web.pid")
-        pidFile.delete() // also removes a stale/dangling symlink; never reuse a previous run's PID
+        // A root-mode run leaves this file owned by root; the app uid cannot unlink it from
+        // the sticky /tmp, so fall back to su before giving up.
+        if (java.nio.file.Files.exists(pidFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS) && !pidFile.delete()) {
+            RootMode.remove(pidFile)
+        }
         check(!java.nio.file.Files.exists(pidFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) { "cannot remove stale runtime pid file" }
         port = pickPort()
         val tmp = File(context.cacheDir, "proot-tmp").apply { mkdirs() }

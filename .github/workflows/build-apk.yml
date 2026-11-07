@@ -90,6 +90,26 @@ jobs:
       - name: Generate l10n from parts
         run: python3 app/tool/l10n_merge.py
 
+      # Fixed release signing: decode the keystore from Secrets and point
+      # key.properties at it, so every self-built APK shares one signature and
+      # can update over the previous one (no uninstall).
+      - name: Configure signing
+        env:
+          KEYSTORE_B64: ${{ secrets.DSH_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.DSH_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.DSH_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DSH_KEY_ALIAS }}
+        run: |
+          mkdir -p app/android/keys
+          printf '%s' "$KEYSTORE_B64" | base64 -d > app/android/keys/dsh-release.jks || true
+          if [ -s app/android/keys/dsh-release.jks ]; then
+            printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$GITHUB_WORKSPACE/app/android/keys/dsh-release.jks" "$KS_PASS" "$KEY_ALIAS" "$KEY_PASS" > app/android/key.properties
+            echo "using fixed release keystore"
+          else
+            echo "no keystore secret; falling back to debug key"
+          fi
+
       # 签名：无 app/android/key.properties → debug key，只可自测（装不到官方签名版上）。
       - name: Build APK
         run: |

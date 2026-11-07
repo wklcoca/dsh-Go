@@ -10301,6 +10301,22 @@ class L10nEn extends L10n {
   String get phoneDirectEngine => 'Direct local engine launch';
 
   @override
+  String get phoneRootMode => 'Root mode (experimental)';
+
+  @override
+  String get phoneRootModeHint =>
+      'Launch the container as real root via su; needs KernelSU/Magisk and takes effect after the engine restarts.';
+
+  @override
+  String get phoneRootNeedsRoot => 'No su found — root the device first';
+
+  @override
+  String get phoneRootStopFirst => 'Stop the engine before changing this';
+
+  @override
+  String get phoneRootChangeFailed => "Couldn't change root mode";
+
+  @override
   String get phoneDirectHint =>
       'Experimental and off by default; applies on the next start. Some phones (Android 16, for one) block a direct start, and the app then goes back to compatible launch on its own. Your data isn’t affected.';
 

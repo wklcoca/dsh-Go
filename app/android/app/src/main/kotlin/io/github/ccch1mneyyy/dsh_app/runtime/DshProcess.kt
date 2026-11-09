@@ -85,6 +85,14 @@ class DshProcess(
     fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, rootEnabled: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
         check(process == null) { "already started" }
         rootMode = rootEnabled && !safe && RootMode.available() && RootMode.granted()
+        // Self-heal: a crash during a root-mode run leaves uid-0 files in /root,/tmp that both a
+        // normal-mode engine and the runtime installer cannot touch. Reclaim them before launch.
+        val rootDirty = File(context.filesDir, "runtime/.root-dirty")
+        if (rootDirty.exists() && RootMode.available()) {
+            RootMode.reclaim(rootfs)
+            runCatching { rootDirty.delete() }
+        }
+        if (rootMode) runCatching { rootDirty.parentFile?.mkdirs(); rootDirty.createNewFile() }
         var selection = DirectLaunch.select(rootfs, directEngine, safe, directFailed)
         if (rootMode) selection = DirectLaunch.Selection(false, null)
         // Only PRoot's fake hard links stand in Direct's way: tidy them once no runtime process is left.
@@ -341,6 +349,12 @@ class DshProcess(
                     // return until they exit. The waiter still retains this owner.
                     killStrays()
                     p.waitFor()
+                    if (rootMode) {
+                        // Hand /root,/tmp back to the app uid so normal mode and the runtime
+                        // installer keep working after a root-mode run.
+                        RootMode.reclaim(rootfs)
+                        runCatching { File(context.filesDir, "runtime/.root-dirty").delete() }
+                    }
                 }
             }
         }

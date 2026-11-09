@@ -133,6 +133,25 @@ object RootMode {
             !java.nio.file.Files.exists(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
     } catch (_: Exception) { false }
 
+    /** rm -rf a tree the app uid cannot delete (root-owned leftovers from a root-mode run). */
+    fun forceDelete(target: File): Boolean = try {
+        val su = suPath() ?: return false
+        ProcessBuilder(su, "-c", "rm -rf -- " + quote(target.absolutePath)).start().waitFor() == 0 &&
+            !java.nio.file.Files.exists(target.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+    } catch (_: Exception) { false }
+
+    /** Give the guest-writable trees back to the app uid after a root-mode run, so normal mode
+     *  (and the runtime installer) can read, rename and delete them again. */
+    fun reclaim(rootfs: File): Boolean = try {
+        val su = suPath() ?: return false
+        val uid = android.os.Process.myUid()
+        val targets = listOf("root", "tmp", "var/lib/dsh-app")
+            .map { File(rootfs, it) }.filter { it.exists() }
+            .joinToString(" ") { quote(it.absolutePath) }
+        if (targets.isEmpty()) true
+        else ProcessBuilder(su, "-c", "chown -R $uid:$uid $targets").start().waitFor() == 0
+    } catch (_: Exception) { false }
+
     private fun guestPidHint(rootfs: File): Int? = try {
         File(rootfs, "tmp/dsh-web.pid").readText().trim().toIntOrNull()?.takeIf { it > 0 }
     } catch (_: Exception) { null }

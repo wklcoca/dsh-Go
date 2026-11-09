@@ -136,6 +136,7 @@ class RuntimeInstaller(
 internal fun File.deleteRecursivelySafely() {
     if (isSymlink()) {
         delete()
+        if (present() && RootMode.available()) RootMode.forceDelete(this)
         return
     }
     if (isDirectory) {
@@ -143,7 +144,9 @@ internal fun File.deleteRecursivelySafely() {
         if (!canWrite()) setWritable(true) // no android.system off the device (JVM tests)
         listFiles()?.forEach { it.deleteRecursivelySafely() }
     }
-    delete()
+    // A tree written by a root-mode proot is owned by uid 0; the app uid cannot unlink it.
+    // Fall back to `su rm -rf` so a later runtime install/upgrade never gets stuck on it.
+    if (!delete() && RootMode.available()) RootMode.forceDelete(this)
 }
 
 private fun File.isSymlink(): Boolean = try {

@@ -105,7 +105,7 @@ object RootExecBridge {
         bridge = null
         if (safe) return false
         return try {
-            val server = McpServer(listOf(RootExec.tool), { name, args -> RootExec.call(name, args) })
+            val server = McpServer(listOf(RootExec.tool), { name, args, _ -> RootExec.call(name, args) })
             val b = PhoneBridge(server) { line -> log(line) }
             val ep = b.start(withTcp = true)
             bridge = b

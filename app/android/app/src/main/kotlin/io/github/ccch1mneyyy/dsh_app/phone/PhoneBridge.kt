@@ -141,7 +141,7 @@ class PhoneBridge(
             } catch (_: Exception) {
                 -1
             }
-            if (uid != Process.myUid()) {
+            if (uid != Process.myUid() && uid != 0) { // root-mode proot runs as uid 0
                 log("[dsh-app] phone bridge: refused a connection from uid $uid")
                 runCatching { sock.close() }
                 continue
@@ -163,7 +163,7 @@ class PhoneBridge(
                 return
             }
             val uid = loopbackPeerUid(sock.port, s.localPort)
-            if (uid != null && uid != Process.myUid()) {
+            if (uid != null && uid != Process.myUid() && uid != 0) { // root-mode proot runs as uid 0
                 log("[dsh-app] phone bridge: refused a tcp connection from uid $uid")
                 runCatching { sock.close() }
                 continue

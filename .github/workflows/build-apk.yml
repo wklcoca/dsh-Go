@@ -70,7 +70,7 @@ jobs:
         run: |
           set -e
           curl -fL --retry 3 -o /tmp/official.apk \
-            "https://gh-proxy.com/https://github.com/ccch1mneyyy/dsh-Go/releases/download/v1.0.12/dsh-go-1.0.12-arm64.apk"
+            "https://gh-proxy.com/https://github.com/ccch1mneyyy/dsh-Go/releases/download/v1.0.13/dsh-go-1.0.13-arm64.apk"
           mkdir -p /tmp/official && (cd /tmp/official && unzip -q /tmp/official.apk)
           OUT=runtime/out/arm64-v8a
           mkdir -p "$OUT/assets/runtime" "$OUT/jniLibs/arm64-v8a"

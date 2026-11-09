@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneControl
+import io.github.ccch1mneyyy.dsh_app.rootexec.RootExecBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -325,6 +326,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 PhoneStorage.syncShortcut(installer.rootfs, storage)
                 // Phone control: bridge up and guest files written before DSH starts; off in safe mode.
                 val phone = PhoneControl.get(app).prepareLaunch(installer.rootfs, safe) { log(it, "system") }
+                RootExecBridge.prepareLaunch(installer.rootfs, safe) { log(it, "system") }
                 if (!safe && !SessionSearchGuest.writeFiles(installer.rootfs)) {
                     log("[dsh-app] message search overlay not written; searching matches titles only", "system")
                 }

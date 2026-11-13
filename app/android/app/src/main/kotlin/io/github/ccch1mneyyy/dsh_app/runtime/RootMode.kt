@@ -152,6 +152,36 @@ object RootMode {
         else ProcessBuilder(su, "-c", "chown -R $uid:$uid $targets").start().waitFor() == 0
     } catch (_: Exception) { false }
 
+    /** Reclaim only the exact engine payload and its parent directories before an in-place upgrade.
+     * Never traverse a symlinked parent (which could lead outside this rootfs). */
+    fun reclaimEngine(rootfs: File): Boolean = try {
+        val su = suPath() ?: return false
+        ProcessBuilder(su, "-c", engineReclaimCommand(rootfs, android.os.Process.myUid())).start().waitFor() == 0
+    } catch (_: Exception) { false }
+
+    internal fun engineReclaimCommand(rootfs: File, uid: Int): String {
+        val paths = ENGINE_PATHS.map { File(rootfs, it) }
+        val parents = linkedSetOf<File>()
+        for (path in paths) {
+            var parent = path.parentFile
+            while (parent != null) {
+                parents.add(parent)
+                if (parent == rootfs) break
+                parent = parent.parentFile
+            }
+        }
+        val checks = parents.joinToString("; ") { "[ ! -L ${quote(it.absolutePath)} ] || exit 1" }
+        val reclaimParents = parents.joinToString("; ") {
+            val path = quote(it.absolutePath)
+            "if [ -e $path ]; then chown -h $uid:$uid $path || exit 1; fi"
+        }
+        val reclaimPayload = paths.joinToString("; ") {
+            val path = quote(it.absolutePath)
+            "if [ -e $path ] || [ -L $path ]; then chown -hR $uid:$uid $path || exit 1; fi"
+        }
+        return "$checks; $reclaimParents; $reclaimPayload"
+    }
+
     private fun guestPidHint(rootfs: File): Int? = try {
         File(rootfs, "tmp/dsh-web.pid").readText().trim().toIntOrNull()?.takeIf { it > 0 }
     } catch (_: Exception) { null }

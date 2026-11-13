@@ -238,6 +238,10 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                     !DshProcess(app, manifest, installer.rootfs, this).killStrays()) {
                     throw RuntimeUpgradeBlocked("running")
                 }
+                if (installer.rootfs.exists() && RootMode.available() &&
+                    (rootModeEnabled() || File(installer.baseDir, ".root-dirty").exists())) {
+                    check(RootMode.reclaimEngine(installer.rootfs)) { "could not reclaim root-owned engine paths; stop the engine and retry" }
+                }
                 if (dropKept) log("[dsh-app] installing without what could not be kept", "system")
                 installer.install(dropKept) { done, total ->
                     emit(mapOf("type" to "progress", "step" to "extract", "done" to done, "total" to total))

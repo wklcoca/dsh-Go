@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneControl
+import io.github.ccch1mneyyy.dsh_app.rootexec.RootExecBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillRoute
@@ -152,6 +153,9 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         "tawcEngineEnabled" to tawcEngine().enabled,
         "tawcEngineAvailable" to (tawcEngineUnavailable() == null),
         "tawcEngineActive" to (process?.executionMode == "tawcroot"),
+        "rootModeEnabled" to rootModeEnabled(),
+        "rootModeAvailable" to RootMode.available(),
+        "rootModeActive" to (process?.rootMode == true),
         "currentExecutionMode" to process?.executionMode,
         "launchSelectedMode" to lastLaunch?.selectedMode,
         "launchSpawned" to (lastLaunch?.spawned == true),
@@ -226,6 +230,16 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         }
     }
 
+    private fun rootModeEnabled(): Boolean = prefs.getBoolean(K_ROOT_MODE, false)
+
+    /** Experimental: launch proot through su as real uid 0. Takes effect on the next start. */
+    @Synchronized fun setRootMode(enabled: Boolean) {
+        check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before changing root mode" }
+        check(!enabled || RootMode.available()) { "this device has no root (su)" }
+        prefs.edit().putBoolean(K_ROOT_MODE, enabled).apply()
+        emitStatus()
+    }
+
     /** While a process is up: its mode; otherwise the mode the next start will use. */
     private fun currentModeSafe(): Boolean {
         val active = process != null || phase == Phase.STARTING || phase == Phase.RUNNING || phase == Phase.STOPPING
@@ -251,6 +265,10 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 if (installer.rootfs.exists() &&
                     !DshProcess(app, manifest, installer.rootfs, this).killStrays()) {
                     throw RuntimeUpgradeBlocked("running")
+                }
+                if (installer.rootfs.exists() && RootMode.available() &&
+                    (rootModeEnabled() || File(installer.baseDir, ".root-dirty").exists())) {
+                    check(RootMode.reclaimEngine(installer.rootfs)) { "could not reclaim root-owned engine paths; stop the engine and retry" }
                 }
                 if (dropKept) log("[dsh-app] installing without what could not be kept", "system")
                 installer.install(dropKept) { done, total ->
@@ -496,6 +514,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 PhoneStorage.syncShortcut(installer.rootfs, storage)
                 // Phone control: bridge up and guest files written before DSH starts; off in safe mode.
                 val phone = PhoneControl.get(app).prepareLaunch(installer.rootfs, safe) { log(it, "system") }
+                RootExecBridge.prepareLaunch(installer.rootfs, safe) { log(it, "system") }
                 val searchOverlay = !safe && SessionSearchGuest.writeFiles(installer.rootfs)
                 if (!safe && !searchOverlay) {
                     log("[dsh-app] message search overlay not written; searching matches titles only", "system")
@@ -559,7 +578,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 val direct = directEngine()
                 val tawc = tawcEngine()
                 p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay,
-                    tawcEngine = tawc.saved == true, tawcFailed = tawc.failed) { actualDirect ->
+                    tawcEngine = tawc.saved == true, tawcFailed = tawc.failed, rootEnabled = rootModeEnabled()) { actualDirect ->
                     // SafeMode.prepare writes its own briefing; leave the original home untouched.
                     if (!safe) GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
                 }
@@ -1166,6 +1185,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         private const val K_TAWC_ENGINE = "tawcEngine"
         /** Runtime version tawcroot failed to start DSH with. */
         private const val K_TAWC_FAILED = "tawcEngineFailedRuntime"
+        private const val K_ROOT_MODE = "rootMode"
         private const val MAIN_FAILURE_LOG = "failure-normal.log"
         private const val LATEST_FAILURE_LOG = "failure-latest.log"
 

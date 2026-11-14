@@ -27,6 +27,13 @@ class _DirectEngineSettingsState extends ConsumerState<DirectEngineSettings> {
     final stopped = !status.phase.isBusy && status.phase != RuntimePhase.running;
     final enabled =
         runtime.loaded && stopped && !_saving && (status.directEngineAvailable || status.directEngineEnabled);
+    final rootAvailable = status.rootModeAvailable;
+    final rootEditable = runtime.loaded && stopped && !_saving && rootAvailable;
+    final rootHint = !rootAvailable
+        ? l10n.phoneRootNeedsRoot
+        : !stopped
+        ? l10n.phoneRootStopFirst
+        : l10n.phoneRootModeHint;
     // Safe mode launches compatibly by design: not a sign the runtime needs it.
     // After Direct failed to launch, native reports the switch off until the
     // user turns it on again (a new try).
@@ -88,6 +95,12 @@ class _DirectEngineSettingsState extends ConsumerState<DirectEngineSettings> {
           value: status.tawcEngineEnabled,
           onChanged: tawcEnabled ? _changeTawc : null,
         ),
+        SettingsSwitchTile(
+          title: l10n.phoneRootMode,
+          subtitle: rootHint,
+          value: status.rootModeEnabled,
+          onChanged: rootEditable ? _changeRoot : null,
+        ),
       ],
     );
   }
@@ -109,6 +122,17 @@ class _DirectEngineSettingsState extends ConsumerState<DirectEngineSettings> {
       await ref.read(runtimeBridgeProvider).setDirectEngine(value);
     } catch (_) {
       if (mounted) showBriefNotice(context, context.l10n.phoneDirectChangeFailed);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _changeRoot(bool value) async {
+    setState(() => _saving = true);
+    try {
+      await ref.read(runtimeBridgeProvider).setRootMode(value);
+    } catch (_) {
+      if (mounted) showBriefNotice(context, context.l10n.phoneRootChangeFailed);
     } finally {
       if (mounted) setState(() => _saving = false);
     }

@@ -1,0 +1,240 @@
+# root-116: 在 GitHub Actions（x86_64 免费 runner）上构建 **签名** dsh-go arm64 APK。
+#
+# 背景：APK 需要 runtime/out/<abi>/{assets,jniLibs}（repo 里 .gitignore 掉，正常要先跑
+# runtime/build-runtime.sh）。这里复用「官方 v1.0.16 APK 里自带的 runtime」跳过它。
+#
+# 与历史 root-114 模板的差异（最小升级）：
+#  1. runtime 复用官方 **v1.0.16** APK，并按 sha256 校验；
+#  2. v1.0.16 新增 tawcroot，release 构建会编译 libtawcroot.so，显式安装 pinned
+#     NDK 28.2.13676358 并导出 ANDROID_NDK_HOME；
+#  3. 仅 workflow_dispatch（无 push/PR 自动触发）；
+#  4. 固定签名缺任一 secret 直接失败，绝不回退 debug key；
+#  5. 追加 RootEngineReclaimTest（Kotlin）+ Flutter analyze/定向测试（非阻塞）；
+#  6. 产出 apksigner 证书、aapt2 metadata 和 SHA256SUMS 随 artifact。
+#
+# 触发：workflow_dispatch。为保证在非默认分支也能用 API 触发，本文件沿用默认分支
+# 已存在的同名路径 `.github/workflows/build-apk.yml`；API 用 ref=<branch> 指定运行分支。
+name: build-apk
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.47.7"
+  GRADLE_VERSION: "9.3.1"
+  # runtime/tawcroot/source.json 的 ndkVersion；libtawcroot.so 必须用它编译
+  TAWC_NDK_VERSION: "28.2.13676358"
+  OFFICIAL_APK_URL: "https://github.com/ccch1mneyyy/dsh-Go/releases/download/v1.0.16/dsh-go-1.0.16-arm64.apk"
+  OFFICIAL_APK_SHA256: "43324a45ec4b36495687e81070ea6a08025643509edbd1733e79e48c7fa429b1"
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Gradle ${{ env.GRADLE_VERSION }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      # settings.gradle.kts 在配置阶段就读 local.properties 的 flutter.sdk，必须先建
+      - name: Write local.properties
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$SDK" "$FLUTTER_ROOT" > app/android/local.properties
+          cat app/android/local.properties
+
+      # app/android/.gitignore 忽略了 gradlew / gradle-wrapper.jar；build-apk.sh 的
+      # stop_daemon 会调用 ./gradlew，必须先生成
+      - name: Generate Gradle wrapper
+        working-directory: app/android
+        run: gradle wrapper --gradle-version "$GRADLE_VERSION" --distribution-type all
+
+      - name: Install Android SDK bits + NDKs
+        run: |
+          set -e
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+          "$SDKM" "platform-tools" "platforms;android-36" "platforms;android-35" "platforms;android-34" \
+                  "build-tools;36.0.0" "build-tools;35.0.0" >/dev/null
+          # Flutter 自己的 NDK（Gradle/Flutter 可能需要）
+          FNDK=$(grep -rhoE 'ndkVersion[[:space:]]*[:=][[:space:]]*"[0-9][0-9.]+"' "$FLUTTER_ROOT/packages/flutter_tools/gradle" 2>/dev/null | grep -oE '[0-9][0-9.]+' | head -1)
+          echo "flutter ndkVersion = ${FNDK:-<none>}"
+          if [ -n "$FNDK" ] && [ ! -d "$SDK/ndk/$FNDK" ]; then "$SDKM" "ndk;$FNDK" || true; fi
+          # tawcroot 的 pinned NDK：build-apk.sh(release) 会用 ANDROID_NDK_HOME 编译 libtawcroot.so
+          "$SDKM" "ndk;$TAWC_NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$SDK/ndk/$TAWC_NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      # repo 里提交的 l10n 生成物可能落后于 parts：用 runner 的 Flutter 从 parts 重新生成
+      - name: Generate l10n from parts
+        run: python3 app/tool/l10n_merge.py
+
+      # 关键：Kotlin 侧编译 + root 精确回收单测（不依赖真 su / 不启动引擎）
+      - name: Kotlin root unit test (RootEngineReclaimTest)
+        working-directory: app/android
+        run: >
+          gradle --stacktrace :app:testArm64DebugUnitTest
+          --tests "io.github.ccch1mneyyy.dsh_app.runtime.RootEngineReclaimTest"
+
+      # 信息性：不阻塞 APK（避免旧 baseline 的无关告警挡住打包）
+      - name: Flutter analyze (informational)
+        continue-on-error: true
+        working-directory: app
+        run: flutter analyze --no-pub
+
+      - name: Flutter targeted tests (informational)
+        continue-on-error: true
+        working-directory: app
+        run: |
+          flutter test --no-pub \
+            test/runtime/runtime_bridge_parsing_test.dart \
+            test/runtime/runtime_bridge_subscription_test.dart \
+            test/settings/direct_engine_settings_test.dart
+
+      - name: Reuse official v1.0.16 runtime (verified, arm64)
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o /tmp/official.apk "$OFFICIAL_APK_URL"
+          echo "$OFFICIAL_APK_SHA256  /tmp/official.apk" | sha256sum -c -
+          mkdir -p /tmp/official && (cd /tmp/official && unzip -q /tmp/official.apk)
+          OUT=runtime/out/arm64-v8a
+          mkdir -p "$OUT/assets/runtime" "$OUT/jniLibs/arm64-v8a"
+          cp -a /tmp/official/assets/runtime/. "$OUT/assets/runtime/"
+          # 精确导出：只复制 manifest.jniLibs 声明的 so（排除自带编译的 libtawcroot.so）
+          python3 - <<'PY'
+          import json, pathlib, shutil, sys
+          abi = "arm64-v8a"
+          manifest = json.loads(pathlib.Path(f"runtime/out/{abi}/assets/runtime/manifest.json").read_text())
+          assert manifest.get("abi") == abi, manifest.get("abi")
+          src = pathlib.Path("/tmp/official/lib") / abi
+          dst = pathlib.Path("runtime/out") / abi / "jniLibs" / abi
+          dst.mkdir(parents=True, exist_ok=True)
+          copied = []
+          for name in manifest["jniLibs"]:
+              if name == "libtawcroot.so":
+                  continue  # 由 runtime/tawcroot/build.py 从 pinned 源码构建
+              s = src / name
+              if not s.is_file():
+                  sys.exit(f"official APK missing {s}")
+              shutil.copy2(s, dst / name)
+              copied.append(name)
+          print("runtimeVersion:", manifest.get("runtimeVersion"), "schema:", manifest.get("schema"))
+          print("copied jniLibs:", sorted(copied))
+          PY
+          python3 -I tooling/check_runtime_bundle.py arm64
+
+      # 固定签名：缺任一 secret 直接失败，绝不回退 debug key
+      - name: Configure signing (fixed; fail if any secret missing)
+        env:
+          KEYSTORE_B64: ${{ secrets.DSH_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.DSH_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.DSH_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DSH_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          for v in KEYSTORE_B64 KS_PASS KEY_PASS KEY_ALIAS; do
+            if [ -z "${!v:-}" ]; then echo "::error::missing signing secret: $v"; exit 1; fi
+          done
+          umask 077
+          mkdir -p app/android/keys
+          printf '%s' "$KEYSTORE_B64" | base64 -d > app/android/keys/dsh-release.jks
+          [ -s app/android/keys/dsh-release.jks ] || { echo "::error::decoded keystore is empty"; exit 1; }
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          def properties_escape(value):
+              encoded = json.dumps(value, ensure_ascii=True)[1:-1]
+              if value.startswith(" "):
+                  encoded = "\\" + encoded
+              return encoded
+
+          entries = {
+              "storeFile": os.environ["GITHUB_WORKSPACE"] + "/app/android/keys/dsh-release.jks",
+              "storePassword": os.environ["KS_PASS"],
+              "keyAlias": os.environ["KEY_ALIAS"],
+              "keyPassword": os.environ["KEY_PASS"],
+          }
+          path = Path("app/android/key.properties")
+          path.write_text("".join(f"{key}={properties_escape(value)}\n" for key, value in entries.items()), encoding="ascii")
+          path.chmod(0o600)
+          PY
+          echo "using fixed release keystore"
+
+      - name: Build signed APK
+        run: |
+          set -euo pipefail
+          chmod +x tooling/build-apk.sh
+          tooling/build-apk.sh --release -f arm64
+
+      - name: Verify signature, metadata and SHA256SUMS
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          FLAVOR=arm64
+          APKSIGNER=$(ls -1d "$SDK"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          AAPT2=$(ls -1d "$SDK"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
+          APK="app/build/app/outputs/flutter-apk/app-${FLAVOR}-release.apk"
+          [ -f "$APK" ] || { echo "::error::APK not found: $APK"; exit 1; }
+          mkdir -p dist
+          cp "$APK" dist/
+          (cd dist && sha256sum "app-${FLAVOR}-release.apk" > SHA256SUMS)
+          "$APKSIGNER" verify --print-certs "$APK" | tee dist/apksigner.txt
+          if grep -qi "Android Debug" dist/apksigner.txt; then
+            echo "::error::APK is debug-signed; refusing to publish"; exit 1
+          fi
+          "$AAPT2" dump badging "$APK" | sed -n '1,3p' | tee dist/aapt-badging.txt
+          PKG=$("$AAPT2" dump badging "$APK" | sed -nE "s/^package: name='([^']+)'.*/\1/p")
+          VNAME=$("$AAPT2" dump badging "$APK" | sed -nE "s/.*versionName='([^']+)'.*/\1/p" | head -1)
+          VCODE=$("$AAPT2" dump badging "$APK" | sed -nE "s/.*versionCode='([^']+)'.*/\1/p" | head -1)
+          APK_SHA=$(sha256sum "$APK" | awk '{print $1}')
+          SIGNER_SHA=$(sed -nE 's/.*certificate SHA-256 digest: ([0-9a-f]+).*/\1/p' dist/apksigner.txt | head -1)
+          {
+            echo "package=$PKG"
+            echo "versionName=$VNAME"
+            echo "versionCode=$VCODE"
+            echo "apk_sha256=$APK_SHA"
+            echo "signer_cert_sha256=$SIGNER_SHA"
+            echo "flavor=$FLAVOR"
+            echo "runtime_source=official v1.0.16 (sha256 $OFFICIAL_APK_SHA256)"
+            echo "git_sha=$GITHUB_SHA"
+            echo "git_ref=$GITHUB_REF_NAME"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > dist/metadata.txt
+          cat dist/metadata.txt
+
+      - name: Upload APK + SHA256SUMS + metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-go-apk
+          path: |
+            dist/app-*-release.apk
+            dist/SHA256SUMS
+            dist/metadata.txt
+            dist/apksigner.txt
+            dist/aapt-badging.txt
+          if-no-files-found: error
+          retention-days: 30
